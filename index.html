@@ -1,0 +1,2132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LMS — Library Management System</title>
+<meta name="description" content="Library management system with real SQL, automatic circulation triggers, overdue fine calculation, and reservation queues.">
+<meta name="author" content="Samuel Tadele Refera">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        bg: { 950: '#08090a', 900: '#0d0e10', 850: '#121316', 800: '#17181c', 700: '#1e2025', 600: '#26282f' },
+        accent: { DEFAULT: '#5b8def', soft: '#7ba1f5' }
+      },
+      fontFamily: {
+        sans: ['Inter', 'system-ui', 'sans-serif'],
+        mono: ['JetBrains Mono', 'ui-monospace', 'monospace']
+      }
+    }
+  }
+}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+  body { background: #08090a; color: #f7f8f8; font-family: 'Inter', system-ui, sans-serif; letter-spacing: -0.011em; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: #08090a; }
+  ::-webkit-scrollbar-thumb { background: #1e2025; border-radius: 5px; border: 2px solid #08090a; }
+  ::-webkit-scrollbar-thumb:hover { background: #26282f; }
+  ::selection { background: #5b8def; color: #08090a; }
+  .surface { background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0) 60%), #0d0e10; border: 1px solid rgba(255,255,255,0.07); }
+  .surface-hover:hover { border-color: rgba(255,255,255,0.14); }
+  .grid-backdrop { background-image: linear-gradient(to right, rgba(255,255,255,0.04) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.04) 1px, transparent 1px); background-size: 64px 64px; }
+  input, select, textarea { color-scheme: dark; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid rgba(91,141,239,0.5); outline-offset: 0; border-color: #5b8def; }
+  .nav-item { transition: all .2s; border-left: 2px solid transparent; }
+  .nav-item:hover { background: rgba(255,255,255,0.03); color: #f7f8f8; }
+  .nav-item.active { background: rgba(91,141,239,0.10); color: #7ba1f5; border-left-color: #5b8def; }
+  @keyframes toastIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  .toast { animation: toastIn .25s ease; }
+  @keyframes modalIn { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: none; } }
+  .modal-panel { animation: modalIn .2s ease; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+  .running { animation: pulse 1.4s ease-in-out infinite; }
+  table { border-collapse: separate; border-spacing: 0; }
+  th { font-weight: 500; }
+</style>
+</head>
+<body>
+
+<div id="loading" class="fixed inset-0 flex items-center justify-center bg-bg-950 z-50">
+  <div class="text-center">
+    <div class="w-10 h-10 border-2 border-white/10 border-t-accent rounded-full animate-spin mx-auto"></div>
+    <p class="mt-4 text-sm text-stone-500 font-mono">Initializing library database…</p>
+  </div>
+</div>
+
+<div id="loginScreen" class="hidden fixed inset-0 grid-backdrop items-center justify-center p-6 z-40">
+  <div class="w-full max-w-md">
+    <div class="text-center mb-8">
+      <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-accent to-[#8b7cff] flex items-center justify-center mx-auto mb-5">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#08090a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 4h7v16H4zM13 4h7v16h-7z"/>
+        </svg>
+      </div>
+      <h1 class="text-2xl font-semibold tracking-tight">Library Management</h1>
+      <p class="text-sm text-stone-500 mt-2">Sign in to continue</p>
+    </div>
+
+    <form id="loginForm" class="surface rounded-2xl p-7 space-y-5">
+      <div>
+        <label class="block text-[11px] font-mono uppercase tracking-widest text-stone-500 mb-2">Username</label>
+        <input id="loginUser" type="text" required autocomplete="username" class="w-full bg-white/[0.02] border border-white/[0.08] rounded-lg px-3.5 py-2.5 text-sm text-stone-100 outline-none">
+      </div>
+      <div>
+        <label class="block text-[11px] font-mono uppercase tracking-widest text-stone-500 mb-2">Password</label>
+        <input id="loginPass" type="password" required autocomplete="current-password" class="w-full bg-white/[0.02] border border-white/[0.08] rounded-lg px-3.5 py-2.5 text-sm text-stone-100 outline-none">
+      </div>
+      <button type="submit" class="w-full bg-white hover:bg-stone-200 text-black font-medium py-2.5 rounded-lg text-sm transition-colors">Sign in</button>
+      <p id="loginError" class="hidden text-xs text-red-400 text-center"></p>
+    </form>
+
+    <div class="mt-6 surface rounded-xl p-4">
+      <div class="text-[11px] font-mono uppercase tracking-widest text-stone-500 mb-3">Demo accounts</div>
+      <div class="space-y-2 text-xs">
+        <button type="button" data-fill="admin:admin123" class="w-full flex justify-between items-center px-3 py-2 rounded-md hover:bg-white/[0.04] transition-colors text-left">
+          <span class="text-stone-300 font-mono">admin / admin123</span>
+          <span class="text-[10px] font-mono text-amber-400/90 uppercase tracking-wider">Admin</span>
+        </button>
+        <button type="button" data-fill="librarian:lib123" class="w-full flex justify-between items-center px-3 py-2 rounded-md hover:bg-white/[0.04] transition-colors text-left">
+          <span class="text-stone-300 font-mono">librarian / lib123</span>
+          <span class="text-[10px] font-mono text-accent-soft uppercase tracking-wider">Circulation</span>
+        </button>
+        <button type="button" data-fill="viewer:view123" class="w-full flex justify-between items-center px-3 py-2 rounded-md hover:bg-white/[0.04] transition-colors text-left">
+          <span class="text-stone-300 font-mono">viewer / view123</span>
+          <span class="text-[10px] font-mono text-stone-500 uppercase tracking-wider">Read-only</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="app" class="hidden min-h-screen">
+  <aside class="fixed top-0 left-0 bottom-0 w-60 bg-bg-900 border-r border-white/[0.06] flex flex-col z-30">
+    <div class="h-14 flex items-center px-5 border-b border-white/[0.06]">
+      <div class="w-7 h-7 rounded-lg bg-gradient-to-br from-accent to-[#8b7cff] flex items-center justify-center flex-shrink-0">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#08090a" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 4h7v16H4zM13 4h7v16h-7z"/>
+        </svg>
+      </div>
+      <div class="ml-2.5">
+        <div class="text-[13px] font-semibold leading-tight">LMS</div>
+        <div class="text-[10px] text-stone-500 font-mono leading-tight">v1.0</div>
+      </div>
+    </div>
+    <nav id="nav" class="flex-1 py-3 space-y-0.5 overflow-y-auto"></nav>
+    <div class="p-3 border-t border-white/[0.06]">
+      <div id="userCard" class="surface rounded-lg p-3"></div>
+    </div>
+  </aside>
+
+  <div class="ml-60">
+    <header class="h-14 border-b border-white/[0.06] bg-bg-950/70 backdrop-blur-xl sticky top-0 z-20">
+      <div class="h-full px-6 flex items-center justify-between">
+        <div id="breadcrumb" class="text-[13px] text-stone-500"></div>
+        <div class="flex items-center gap-3">
+          <span id="overdueIndicator" class="text-[11px] font-mono"></span>
+          <button id="resetDbBtn" class="text-[12px] text-stone-500 hover:text-red-400 transition-colors inline-flex items-center gap-1.5">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
+            Reset database
+          </button>
+        </div>
+      </div>
+    </header>
+    <main id="main" class="p-6 lg:p-8 max-w-7xl"></main>
+  </div>
+</div>
+
+<div id="modalRoot" class="hidden fixed inset-0 z-40 bg-black/70 backdrop-blur-sm items-center justify-center p-4"></div>
+<div id="toastRoot" class="fixed bottom-6 right-6 z-50 space-y-2"></div>
+
+<script>
+/* ============================================================================
+   LMS — Library Management System
+   Real SQL (SQLite via SQL.js) with triggers, date arithmetic, and transactions.
+   ============================================================================ */
+
+/* ========== UTILITIES ========== */
+const U = {
+  esc(s) {
+    if (s === null || s === undefined) return '';
+    return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  },
+  today() { return new Date().toISOString().slice(0, 10); },
+  addDays(dateStr, n) {
+    const d = new Date(dateStr);
+    d.setDate(d.getDate() + n);
+    return d.toISOString().slice(0, 10);
+  },
+  daysBetween(a, b) {
+    const d1 = new Date(a), d2 = new Date(b);
+    return Math.floor((d2 - d1) / 86400000);
+  },
+  time(ts) {
+    const d = new Date(ts);
+    const now = Date.now();
+    const diff = Math.floor((now - ts) / 1000);
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    if (diff < 604800) return Math.floor(diff / 86400) + 'd ago';
+    return d.toISOString().slice(0, 10);
+  },
+  date(s) { return s ? new Date(s).toISOString().slice(0, 10) : '—'; },
+  currency(n) { return (Math.round(n * 100) / 100).toFixed(2) + ' ETB'; },
+  uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+};
+
+/* ========== CONSTANTS ========== */
+const RULES = {
+  LOAN_DAYS: 14,
+  FINE_PER_DAY: 5,
+  MAX_LOANS_PER_MEMBER: 3,
+  SUSPEND_FINE_THRESHOLD: 200,
+  SUSPEND_OVERDUE_COUNT: 2
+};
+
+/* ========== DB LAYER ========== */
+const DB = {
+  sql: null,
+  db: null,
+  KEY: 'lms_db_v1',
+
+  async init() {
+    this.sql = await initSqlJs({
+      locateFile: f => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${f}`
+    });
+    const saved = localStorage.getItem(this.KEY);
+    if (saved) {
+      try {
+        this.db = new this.sql.Database(Uint8Array.from(JSON.parse(saved)));
+        // Verify DB is intact AND has users
+        const userCount = this.db.exec('SELECT COUNT(*) FROM users')[0].values[0][0];
+        if (userCount > 0) return;
+        console.warn('Saved DB has no users — reseeding.');
+        localStorage.removeItem(this.KEY);
+      } catch (e) {
+        console.warn('Reseeding DB:', e);
+        localStorage.removeItem(this.KEY);
+      }
+    }
+    this.db = new this.sql.Database();
+    await this.seed();
+    this.save();
+  },
+
+  async seed() {
+    this.db.run(`
+      PRAGMA foreign_keys = ON;
+
+      CREATE TABLE categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT UNIQUE NOT NULL,
+        name TEXT NOT NULL
+      );
+
+      CREATE TABLE books (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        isbn TEXT UNIQUE NOT NULL,
+        title TEXT NOT NULL,
+        author TEXT NOT NULL,
+        category_id INTEGER NOT NULL,
+        publisher TEXT,
+        published_year INTEGER,
+        total_copies INTEGER NOT NULL CHECK (total_copies >= 0),
+        available_copies INTEGER NOT NULL CHECK (available_copies >= 0),
+        shelf TEXT,
+        FOREIGN KEY (category_id) REFERENCES categories(id)
+      );
+
+      CREATE TABLE members (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        member_id TEXT UNIQUE NOT NULL,
+        first_name TEXT NOT NULL,
+        last_name TEXT NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        phone TEXT,
+        join_date TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','suspended','expired')),
+        notes TEXT
+      );
+
+      CREATE TABLE loans (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        book_id INTEGER NOT NULL,
+        member_id INTEGER NOT NULL,
+        loan_date TEXT NOT NULL,
+        due_date TEXT NOT NULL,
+        return_date TEXT,
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','returned','overdue','lost')),
+        fine_amount REAL NOT NULL DEFAULT 0,
+        fine_paid INTEGER NOT NULL DEFAULT 0,
+        FOREIGN KEY (book_id) REFERENCES books(id),
+        FOREIGN KEY (member_id) REFERENCES members(id)
+      );
+
+      CREATE TABLE reservations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        book_id INTEGER NOT NULL,
+        member_id INTEGER NOT NULL,
+        reserved_at TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','fulfilled','cancelled')),
+        FOREIGN KEY (book_id) REFERENCES books(id),
+        FOREIGN KEY (member_id) REFERENCES members(id)
+      );
+
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        role TEXT NOT NULL CHECK (role IN ('admin','librarian','viewer')),
+        display_name TEXT NOT NULL
+      );
+
+      CREATE INDEX idx_books_category ON books(category_id);
+      CREATE INDEX idx_loans_book ON loans(book_id);
+      CREATE INDEX idx_loans_member ON loans(member_id);
+      CREATE INDEX idx_loans_status ON loans(status);
+      CREATE INDEX idx_res_book ON reservations(book_id);
+
+      CREATE TRIGGER trg_loan_insert AFTER INSERT ON loans
+      WHEN NEW.status = 'active'
+      BEGIN
+        UPDATE books SET available_copies = available_copies - 1
+        WHERE id = NEW.book_id;
+      END;
+
+      CREATE TRIGGER trg_loan_return AFTER UPDATE OF status ON loans
+      WHEN OLD.status != 'returned' AND NEW.status = 'returned'
+      BEGIN
+        UPDATE books SET available_copies = available_copies + 1
+        WHERE id = NEW.book_id;
+      END;
+    `);
+
+    // Categories
+    const cats = [
+      ['CS', 'Computer Science'],
+      ['LIT', 'Literature'],
+      ['HIS', 'History'],
+      ['SCI', 'Science'],
+      ['BUS', 'Business'],
+      ['REF', 'Reference'],
+    ];
+    cats.forEach(c => this.db.run('INSERT INTO categories (code, name) VALUES (?,?)', c));
+
+    // Books
+    const books = [
+      ['978-99944-0-001-1', 'Fundamentals of Database Systems', 'Elmasri & Navathe', 1, 'Pearson', 2016, 5, 5, 'A-01'],
+      ['978-99944-0-002-2', 'Introduction to Algorithms', 'Cormen et al.', 1, 'MIT Press', 2009, 4, 4, 'A-02'],
+      ['978-99944-0-003-3', 'Clean Code', 'Robert C. Martin', 1, 'Prentice Hall', 2008, 3, 3, 'A-03'],
+      ['978-99944-0-004-4', 'The Pragmatic Programmer', 'Hunt & Thomas', 1, 'Addison-Wesley', 2019, 3, 3, 'A-04'],
+      ['978-99944-0-005-5', 'Design Patterns', 'Gang of Four', 1, 'Addison-Wesley', 1994, 2, 2, 'A-05'],
+      ['978-99944-0-006-6', 'Computer Networking: A Top-Down Approach', 'Kurose & Ross', 1, 'Pearson', 2020, 4, 4, 'A-06'],
+      ['978-99944-0-007-7', 'Operating System Concepts', 'Silberschatz', 1, 'Wiley', 2018, 3, 3, 'A-07'],
+      ['978-99944-0-008-8', 'Learning SQL', 'Alan Beaulieu', 1, 'O\'Reilly', 2020, 5, 5, 'A-08'],
+      ['978-99944-0-009-9', 'JavaScript: The Good Parts', 'Douglas Crockford', 1, 'O\'Reilly', 2008, 3, 3, 'A-09'],
+      ['978-99944-0-010-0', 'Refactoring', 'Martin Fowler', 1, 'Addison-Wesley', 2018, 2, 2, 'A-10'],
+      ['978-99944-0-011-1', 'Things Fall Apart', 'Chinua Achebe', 2, 'Heinemann', 1958, 6, 6, 'B-01'],
+      ['978-99944-0-012-2', 'Half of a Yellow Sun', 'Chimamanda Ngozi Adichie', 2, 'Knopf', 2006, 3, 3, 'B-02'],
+      ['978-99944-0-013-3', 'The Beautyful Ones Are Not Yet Born', 'Ayi Kwei Armah', 2, 'Heinemann', 1968, 2, 2, 'B-03'],
+      ['978-99944-0-014-4', 'One Hundred Years of Solitude', 'Gabriel García Márquez', 2, 'Harper', 1967, 4, 4, 'B-04'],
+      ['978-99944-0-015-5', 'Ficciones', 'Jorge Luis Borges', 2, 'Grove', 1944, 2, 2, 'B-05'],
+      ['978-99944-0-016-6', 'Cutting for Stone', 'Abraham Verghese', 2, 'Knopf', 2009, 3, 3, 'B-06'],
+      ['978-99944-0-017-7', 'The Shadow of the Sun', 'Ryszard Kapuściński', 2, 'Vintage', 1998, 2, 2, 'B-07'],
+      ['978-99944-0-018-8', 'Beneath the Lion\'s Gaze', 'Maaza Mengiste', 2, 'Norton', 2010, 3, 3, 'B-08'],
+      ['978-99944-0-019-9', 'The Emperor', 'Ryszard Kapuściński', 3, 'Harcourt', 1978, 2, 2, 'C-01'],
+      ['978-99944-0-020-0', 'King of Kings', 'Asfa-Wossen Asserate', 3, 'Haus', 2015, 2, 2, 'C-02'],
+      ['978-99944-0-021-1', 'A History of Ethiopia', 'Harold Marcus', 3, 'University of California Press', 1994, 3, 3, 'C-03'],
+      ['978-99944-0-022-2', 'The Cambridge History of Africa', 'J. D. Fage', 3, 'Cambridge', 1975, 2, 2, 'C-04'],
+      ['978-99944-0-023-3', 'Guns, Germs, and Steel', 'Jared Diamond', 3, 'Norton', 1997, 4, 4, 'C-05'],
+      ['978-99944-0-024-4', 'Sapiens', 'Yuval Noah Harari', 3, 'Harper', 2011, 5, 5, 'C-06'],
+      ['978-99944-0-025-5', 'The Silk Roads', 'Peter Frankopan', 3, 'Knopf', 2015, 2, 2, 'C-07'],
+      ['978-99944-0-026-6', 'A Brief History of Time', 'Stephen Hawking', 4, 'Bantam', 1988, 4, 4, 'D-01'],
+      ['978-99944-0-027-7', 'Cosmos', 'Carl Sagan', 4, 'Random House', 1980, 3, 3, 'D-02'],
+      ['978-99944-0-028-8', 'The Selfish Gene', 'Richard Dawkins', 4, 'Oxford', 1976, 3, 3, 'D-03'],
+      ['978-99944-0-029-9', 'Thinking, Fast and Slow', 'Daniel Kahneman', 4, 'Farrar', 2011, 4, 4, 'D-04'],
+      ['978-99944-0-030-0', 'The Structure of Scientific Revolutions', 'Thomas Kuhn', 4, 'Chicago', 1962, 2, 2, 'D-05'],
+      ['978-99944-0-031-1', 'The Art of Statistics', 'David Spiegelhalter', 4, 'Basic', 2019, 3, 3, 'D-06'],
+      ['978-99944-0-032-2', 'Zero to One', 'Peter Thiel', 5, 'Crown', 2014, 3, 3, 'E-01'],
+      ['978-99944-0-033-3', 'The Lean Startup', 'Eric Ries', 5, 'Crown', 2011, 4, 4, 'E-02'],
+      ['978-99944-0-034-4', 'Good to Great', 'Jim Collins', 5, 'Harper', 2001, 2, 2, 'E-03'],
+      ['978-99944-0-035-5', 'Thinking in Systems', 'Donella Meadows', 5, 'Chelsea Green', 2008, 3, 3, 'E-04'],
+      ['978-99944-0-036-6', 'The Innovator\'s Dilemma', 'Clayton Christensen', 5, 'Harvard', 1997, 2, 2, 'E-05'],
+      ['978-99944-0-037-7', 'Nudge', 'Thaler & Sunstein', 5, 'Yale', 2008, 3, 3, 'E-06'],
+      ['978-99944-0-038-8', 'Oxford English Dictionary', 'Oxford', 6, 'Oxford', 2010, 2, 2, 'F-01'],
+      ['978-99944-0-039-9', 'Encyclopedia Britannica Vol. 1', 'Britannica', 6, 'Britannica', 2015, 1, 1, 'F-02'],
+      ['978-99944-0-040-0', 'Atlas of the World', 'National Geographic', 6, 'NatGeo', 2020, 2, 2, 'F-03'],
+      ['978-99944-0-041-1', 'The Chicago Manual of Style', 'University of Chicago', 6, 'Chicago', 2017, 3, 3, 'F-04'],
+      ['978-99944-0-042-2', 'Webster\'s Dictionary', 'Merriam-Webster', 6, 'Merriam-Webster', 2019, 2, 2, 'F-05'],
+      ['978-99944-0-043-3', 'Ethiopia: A Cultural History', 'Sylvia Pankhurst', 3, 'Lalibela', 1955, 2, 2, 'C-08'],
+      ['978-99944-0-044-4', 'The Sign and the Seal', 'Graham Hancock', 3, 'Crown', 1992, 2, 2, 'C-09'],
+      ['978-99944-0-045-5', 'Wax and Gold', 'Donald Levine', 2, 'Chicago', 1965, 2, 2, 'B-09'],
+      ['978-99944-0-046-6', 'The Life and Times of Menelik II', 'Harold Marcus', 3, 'Red Sea Press', 1995, 2, 2, 'C-10'],
+    ];
+    books.forEach(b => this.db.run(
+      'INSERT INTO books (isbn, title, author, category_id, publisher, published_year, total_copies, available_copies, shelf) VALUES (?,?,?,?,?,?,?,?,?)',
+      b
+    ));
+
+    // Members
+    const members = [
+      ['MEM-1001', 'Abebe', 'Bekele', 'abebe.b@example.com', '+251911000101', '2023-03-15'],
+      ['MEM-1002', 'Sara', 'Tadesse', 'sara.t@example.com', '+251911000102', '2023-05-02'],
+      ['MEM-1003', 'Dawit', 'Haile', 'dawit.h@example.com', '+251911000103', '2023-08-20'],
+      ['MEM-1004', 'Hana', 'Girma', 'hana.g@example.com', '+251911000104', '2023-11-11'],
+      ['MEM-1005', 'Yohannes', 'Tesfaye', 'yohannes.t@example.com', '+251911000105', '2024-01-08'],
+      ['MEM-1006', 'Meron', 'Assefa', 'meron.a@example.com', '+251911000106', '2024-02-14'],
+      ['MEM-1007', 'Samuel', 'Tadele', 'samuel.t@example.com', '+251911000107', '2024-04-01'],
+      ['MEM-1008', 'Ruth', 'Mekonnen', 'ruth.m@example.com', '+251911000108', '2024-06-19'],
+      ['MEM-1009', 'Kalkidan', 'Alemayehu', 'kalkidan.a@example.com', '+251911000109', '2024-08-05'],
+      ['MEM-1010', 'Bereket', 'Solomon', 'bereket.s@example.com', '+251911000110', '2024-09-22'],
+      ['MEM-1011', 'Tigist', 'Mulugeta', 'tigist.m@example.com', '+251911000111', '2024-10-30'],
+      ['MEM-1012', 'Firaol', 'Desta', 'firaol.d@example.com', '+251911000112', '2025-01-15'],
+      ['MEM-1013', 'Selam', 'Lemma', 'selam.l@example.com', '+251911000113', '2025-02-28'],
+      ['MEM-1014', 'Naol', 'Getachew', 'naol.g@example.com', '+251911000114', '2025-03-12'],
+      ['MEM-1015', 'Eden', 'Fikru', 'eden.f@example.com', '+251911000115', '2025-04-25'],
+    ];
+    members.forEach(m => this.db.run(
+      'INSERT INTO members (member_id, first_name, last_name, email, phone, join_date) VALUES (?,?,?,?,?,?)',
+      m
+    ));
+
+    // Loans
+    const today = new Date();
+    const d = (offset) => {
+      const dt = new Date(today);
+      dt.setDate(today.getDate() + offset);
+      return dt.toISOString().slice(0, 10);
+    };
+    const loans = [
+      [1, 1, d(-5), d(9), 'active', null],
+      [3, 1, d(-3), d(11), 'active', null],
+      [11, 2, d(-20), d(-6), 'active', null],
+      [4, 3, d(-8), d(6), 'active', null],
+      [8, 4, d(-12), d(2), 'active', null],
+      [14, 5, d(-25), d(-11), 'active', null],
+      [22, 6, d(-7), d(7), 'active', null],
+      [26, 7, d(-2), d(12), 'active', null],
+      [31, 8, d(-30), d(-16), 'active', null],
+      [36, 9, d(-10), d(4), 'active', null],
+      [40, 10, d(-15), d(-1), 'active', null],
+      [2, 11, d(-45), d(-31), 'returned', d(-25)],
+      [12, 12, d(-30), d(-16), 'returned', d(-14)],
+      [18, 13, d(-20), d(-6), 'returned', d(-8)],
+      [28, 14, d(-40), d(-26), 'returned', d(-26)],
+    ];
+    loans.forEach(l => {
+      let fine = 0;
+      if (l[4] === 'returned' && l[5]) {
+        const overdueDays = Math.max(0, U.daysBetween(l[3], l[5]));
+        fine = overdueDays * RULES.FINE_PER_DAY;
+      }
+      this.db.run(
+        'INSERT INTO loans (book_id, member_id, loan_date, due_date, return_date, status, fine_amount, fine_paid) VALUES (?,?,?,?,?,?,?,?)',
+        [l[0], l[1], l[2], l[3], l[5], l[4], fine, l[4] === 'returned' ? 1 : 0]
+      );
+    });
+
+    // Reservations
+    const res = [
+      [3, 5, d(-2), 'pending'],
+      [3, 7, d(-1), 'pending'],
+      [11, 9, d(-3), 'pending'],
+      [26, 12, d(-1), 'pending'],
+    ];
+    res.forEach(r => this.db.run(
+      'INSERT INTO reservations (book_id, member_id, reserved_at, status) VALUES (?,?,?,?)',
+      r
+    ));
+
+    // Sync available_copies
+    this.db.run(`
+      UPDATE books SET available_copies = total_copies - (
+        SELECT COUNT(*) FROM loans WHERE loans.book_id = books.id AND loans.status IN ('active','overdue')
+      )
+    `);
+
+    // Users — awaited sequentially so they exist before save()
+    const users = [
+      ['admin', 'admin', 'admin123', 'admin', 'Administrator'],
+      ['librarian', 'librarian', 'lib123', 'librarian', 'Circulation Desk'],
+      ['viewer', 'viewer', 'view123', 'viewer', 'Read-only Guest']
+    ];
+    for (const u of users) {
+      const hash = await Auth.hash(u[2], u[0]);
+      this.db.run('INSERT INTO users (username, password_hash, role, display_name) VALUES (?,?,?,?)',
+        [u[0], hash, u[3], u[4]]);
+    }
+  },
+
+  all(sql, params = []) {
+    const stmt = this.db.prepare(sql);
+    stmt.bind(params);
+    const rows = [];
+    while (stmt.step()) rows.push(stmt.getAsObject());
+    stmt.free();
+    return rows;
+  },
+  one(sql, params = []) { return this.all(sql, params)[0] || null; },
+  run(sql, params = []) { this.db.run(sql, params); this.save(); },
+
+  tx(fn) {
+    this.db.run('BEGIN');
+    try {
+      const result = fn();
+      this.db.run('COMMIT');
+      this.save();
+      return result;
+    } catch (e) {
+      this.db.run('ROLLBACK');
+      throw e;
+    }
+  },
+
+  save() {
+    try {
+      localStorage.setItem(this.KEY, JSON.stringify(Array.from(this.db.export())));
+    } catch (e) {
+      UI.toast('Storage full — reset the database', 'error');
+    }
+  },
+
+  reset() {
+    localStorage.removeItem(this.KEY);
+    this.db = new this.sql.Database();
+    return this.seed().then(() => this.save());
+  },
+
+  exec(sql) { return this.db.exec(sql); }
+};
+
+/* ========== AUTH ========== */
+const Auth = {
+  current: null,
+  async hash(password, salt) {
+    const data = new TextEncoder().encode(salt + '::' + password);
+    const buf = await crypto.subtle.digest('SHA-256', data);
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+  },
+  async login(username, password) {
+    const user = DB.one('SELECT * FROM users WHERE username = ?', [username]);
+    if (!user) return { ok: false, error: 'User not found' };
+    const hash = await this.hash(password, username);
+    if (hash !== user.password_hash) return { ok: false, error: 'Incorrect password' };
+    this.current = { id: user.id, username: user.username, role: user.role, name: user.display_name };
+    return { ok: true };
+  },
+  logout() { this.current = null; },
+  can(action) {
+    if (!this.current) return false;
+    const perms = {
+      'books.create':    ['admin', 'librarian'],
+      'books.edit':      ['admin', 'librarian'],
+      'books.delete':    ['admin'],
+      'members.create':  ['admin', 'librarian'],
+      'members.edit':    ['admin', 'librarian'],
+      'members.delete':  ['admin'],
+      'loans.issue':     ['admin', 'librarian'],
+      'loans.return':    ['admin', 'librarian'],
+      'loans.renew':     ['admin', 'librarian'],
+      'fines.pay':       ['admin', 'librarian'],
+      'reservations.create': ['admin', 'librarian'],
+      'reservations.cancel': ['admin', 'librarian'],
+      'db.reset':        ['admin']
+    };
+    return (perms[action] || []).includes(this.current.role);
+  }
+};
+
+/* ========== LIBRARY BUSINESS LOGIC ========== */
+const Library = {
+  getBookState(bookId) {
+    return DB.one(`
+      SELECT b.*, c.name AS category_name,
+        (SELECT COUNT(*) FROM loans WHERE book_id = b.id AND status IN ('active','overdue')) AS on_loan,
+        (SELECT COUNT(*) FROM reservations WHERE book_id = b.id AND status = 'pending') AS reserved
+      FROM books b
+      JOIN categories c ON b.category_id = c.id
+      WHERE b.id = ?`, [bookId]);
+  },
+
+  getMemberState(memberId) {
+    return DB.one(`
+      SELECT m.*,
+        (SELECT COUNT(*) FROM loans WHERE member_id = m.id AND status IN ('active','overdue')) AS active_loans,
+        (SELECT COUNT(*) FROM loans WHERE member_id = m.id AND status = 'overdue') AS overdue_loans,
+        (SELECT COALESCE(SUM(fine_amount),0) FROM loans WHERE member_id = m.id AND fine_paid = 0) AS unpaid_fines
+      FROM members m
+      WHERE m.id = ?`, [memberId]);
+  },
+
+  issue(bookId, memberId, days = RULES.LOAN_DAYS) {
+    const book = this.getBookState(bookId);
+    const member = this.getMemberState(memberId);
+
+    if (!book || !member) throw new Error('Book or member not found');
+    if (member.status === 'suspended') throw new Error('Member is suspended');
+    if (member.status === 'expired') throw new Error('Membership expired');
+    if (member.active_loans >= RULES.MAX_LOANS_PER_MEMBER)
+      throw new Error(`Loan limit reached (${RULES.MAX_LOANS_PER_MEMBER} books)`);
+    if (book.available_copies < 1) throw new Error('No copies available');
+    if (member.unpaid_fines >= RULES.SUSPEND_FINE_THRESHOLD)
+      throw new Error(`Unpaid fines (${U.currency(member.unpaid_fines)}) exceed threshold`);
+
+    const loanDate = U.today();
+    const dueDate = U.addDays(loanDate, days);
+
+    return DB.tx(() => {
+      DB.db.run(
+        'INSERT INTO loans (book_id, member_id, loan_date, due_date, status) VALUES (?,?,?,?,?)',
+        [bookId, memberId, loanDate, dueDate, 'active']
+      );
+      return { loanDate, dueDate };
+    });
+  },
+
+  returnBook(loanId) {
+    const loan = DB.one(`
+      SELECT l.*, b.title, b.id AS book_id, m.first_name, m.last_name
+      FROM loans l
+      JOIN books b ON l.book_id = b.id
+      JOIN members m ON l.member_id = m.id
+      WHERE l.id = ?`, [loanId]);
+    if (!loan) throw new Error('Loan not found');
+    if (loan.status === 'returned') throw new Error('Already returned');
+
+    const returnDate = U.today();
+    const overdueDays = Math.max(0, U.daysBetween(loan.due_date, returnDate));
+    const fine = overdueDays * RULES.FINE_PER_DAY;
+
+    return DB.tx(() => {
+      DB.db.run(
+        'UPDATE loans SET return_date = ?, status = ?, fine_amount = ? WHERE id = ?',
+        [returnDate, 'returned', fine, loanId]
+      );
+      this._recheckMemberStatus(loan.member_id);
+      return { returnDate, overdueDays, fine };
+    });
+  },
+
+  renew(loanId, extraDays = RULES.LOAN_DAYS) {
+    const loan = DB.one('SELECT * FROM loans WHERE id = ?', [loanId]);
+    if (!loan) throw new Error('Loan not found');
+    if (loan.status !== 'active') throw new Error('Only active loans can be renewed');
+
+    const overdueDays = Math.max(0, U.daysBetween(loan.due_date, U.today()));
+    if (overdueDays > 0) throw new Error('Overdue loans cannot be renewed');
+
+    const reservations = DB.one(
+      "SELECT COUNT(*) c FROM reservations WHERE book_id = ? AND status = 'pending'",
+      [loan.book_id]
+    );
+    if (reservations.c > 0) throw new Error('Cannot renew — book is reserved by another member');
+
+    const newDue = U.addDays(loan.due_date, extraDays);
+    DB.run('UPDATE loans SET due_date = ? WHERE id = ?', [newDue, loanId]);
+    return { newDue };
+  },
+
+  payFine(loanId) {
+    DB.run('UPDATE loans SET fine_paid = 1 WHERE id = ?', [loanId]);
+    const loan = DB.one('SELECT member_id FROM loans WHERE id = ?', [loanId]);
+    if (loan) this._recheckMemberStatus(loan.member_id);
+  },
+
+  reserve(bookId, memberId) {
+    const existing = DB.one(
+      "SELECT id FROM reservations WHERE book_id = ? AND member_id = ? AND status = 'pending'",
+      [bookId, memberId]
+    );
+    if (existing) throw new Error('Already reserved by this member');
+
+    const book = this.getBookState(bookId);
+    if (!book) throw new Error('Book not found');
+
+    if (book.available_copies > 0 && book.reserved === 0) {
+      throw new Error('Copies are available — issue the book directly');
+    }
+
+    DB.run(
+      "INSERT INTO reservations (book_id, member_id, reserved_at, status) VALUES (?,?,?,'pending')",
+      [bookId, memberId, U.today()]
+    );
+  },
+
+  cancelReservation(id) {
+    DB.run("UPDATE reservations SET status = 'cancelled' WHERE id = ?", [id]);
+  },
+
+  _recheckMemberStatus(memberId) {
+    const state = this.getMemberState(memberId);
+    if (!state) return;
+    if (state.status === 'expired') return;
+
+    const shouldSuspend =
+      state.overdue_loans >= RULES.SUSPEND_OVERDUE_COUNT ||
+      state.unpaid_fines >= RULES.SUSPEND_FINE_THRESHOLD;
+
+    if (shouldSuspend && state.status !== 'suspended') {
+      DB.db.run("UPDATE members SET status = 'suspended' WHERE id = ?", [memberId]);
+    } else if (!shouldSuspend && state.status === 'suspended') {
+      DB.db.run("UPDATE members SET status = 'active' WHERE id = ?", [memberId]);
+    }
+  },
+
+  refreshOverdueStatus() {
+    const today = U.today();
+    DB.run(`
+      UPDATE loans SET status = 'overdue'
+      WHERE status = 'active' AND due_date < ?
+    `, [today]);
+
+    DB.all('SELECT id FROM members').forEach(m => this._recheckMemberStatus(m.id));
+  }
+};
+
+/* ========== UI HELPERS ========== */
+const UI = {
+  toast(message, type = 'info') {
+    const colors = {
+      info:    'border-white/10 text-stone-200',
+      success: 'border-emerald-500/30 text-emerald-300',
+      error:   'border-red-500/30 text-red-300',
+      warn:    'border-amber-500/30 text-amber-300'
+    };
+    const el = document.createElement('div');
+    el.className = 'toast surface rounded-lg px-4 py-3 text-sm max-w-xs shadow-xl border ' + colors[type];
+    el.textContent = message;
+    document.getElementById('toastRoot').appendChild(el);
+    setTimeout(() => {
+      el.style.transition = 'opacity .3s, transform .3s';
+      el.style.opacity = '0';
+      el.style.transform = 'translateY(8px)';
+      setTimeout(() => el.remove(), 300);
+    }, 3400);
+  },
+
+  modal({ title, body, footer, onMount, wide }) {
+    const root = document.getElementById('modalRoot');
+    root.innerHTML = `
+      <div class="modal-panel surface rounded-2xl w-full ${wide ? 'max-w-3xl' : 'max-w-lg'} max-h-[88vh] overflow-y-auto">
+        <div class="flex items-center justify-between p-5 border-b border-white/[0.06]">
+          <h2 class="text-base font-medium">${U.esc(title)}</h2>
+          <button data-close aria-label="Close" class="w-8 h-8 rounded-md text-stone-500 hover:text-stone-100 hover:bg-white/[0.05] flex items-center justify-center transition-colors">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 4l8 8M12 4l-8 8" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+        <div class="p-5">${body}</div>
+        ${footer ? `<div class="p-5 border-t border-white/[0.06] flex justify-end gap-2">${footer}</div>` : ''}
+      </div>
+    `;
+    root.classList.remove('hidden');
+    root.classList.add('flex');
+    root.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', UI.closeModal));
+    root.addEventListener('mousedown', e => { if (e.target === root) UI.closeModal(); });
+    if (onMount) onMount(root);
+  },
+
+  closeModal() {
+    const root = document.getElementById('modalRoot');
+    root.classList.add('hidden');
+    root.classList.remove('flex');
+    root.innerHTML = '';
+  },
+
+  confirm(message, onConfirm, opts = {}) {
+    const danger = opts.danger !== false;
+    UI.modal({
+      title: opts.title || 'Confirm action',
+      body: `<p class="text-sm text-stone-300">${U.esc(message)}</p>`,
+      footer: `
+        <button data-close class="px-4 py-2 text-sm text-stone-300 hover:text-white transition-colors">Cancel</button>
+        <button id="confirmYes" class="px-4 py-2 text-sm font-medium ${danger ? 'bg-red-500 hover:bg-red-400' : 'bg-white hover:bg-stone-200 text-black'} text-white rounded-lg transition-colors">
+          ${U.esc(opts.confirmLabel || 'Delete')}
+        </button>
+      `,
+      onMount(root) {
+        root.querySelector('#confirmYes').addEventListener('click', () => {
+          UI.closeModal();
+          onConfirm();
+        });
+      }
+    });
+  },
+
+  empty(title, hint) {
+    return `
+      <div class="text-center py-16 px-6">
+        <div class="w-12 h-12 rounded-xl bg-white/[0.03] border border-white/[0.06] flex items-center justify-center mx-auto mb-4">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" class="text-stone-600">
+            <circle cx="11" cy="11" r="7"/><path d="M4 20l6-6"/>
+          </svg>
+        </div>
+        <h3 class="text-sm text-stone-300 font-medium">${U.esc(title)}</h3>
+        ${hint ? `<p class="text-xs text-stone-500 mt-1.5 max-w-sm mx-auto">${U.esc(hint)}</p>` : ''}
+      </div>
+    `;
+  },
+
+  statusBadge(status) {
+    const map = {
+      active:    'bg-emerald-500/10 text-emerald-300',
+      overdue:   'bg-red-500/10 text-red-300',
+      returned:  'bg-white/[0.04] text-stone-400',
+      suspended: 'bg-amber-500/10 text-amber-300',
+      expired:   'bg-white/[0.04] text-stone-500',
+      pending:   'bg-accent/10 text-accent-soft',
+      fulfilled: 'bg-emerald-500/10 text-emerald-300',
+      cancelled: 'bg-white/[0.04] text-stone-500',
+      lost:      'bg-red-500/10 text-red-300'
+    };
+    return `<span class="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded ${map[status] || 'bg-white/[0.04] text-stone-400'}">${status}</span>`;
+  },
+
+  roleBadge(role) {
+    const map = {
+      admin:     'bg-amber-500/10 text-amber-300 border-amber-500/30',
+      librarian: 'bg-accent/10 text-accent-soft border-accent/30',
+      viewer:    'bg-white/[0.04] text-stone-400 border-white/[0.10]'
+    };
+    return `<span class="text-[10px] font-mono uppercase tracking-widest px-2 py-0.5 rounded border ${map[role]}">${role}</span>`;
+  }
+};
+
+/* ========== NAV ========== */
+const NAV = [
+  { id: 'dashboard',    label: 'Dashboard',    icon: '<rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/>' },
+  { id: 'circulation',  label: 'Circulation',  icon: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>' },
+  { id: 'catalog',      label: 'Catalog',      icon: '<path d="M4 4h7v16H4zM13 4h7v16h-7z"/>' },
+  { id: 'members',      label: 'Members',      icon: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-7 8-7s8 3 8 7"/>' },
+  { id: 'loans',        label: 'Loans',        icon: '<path d="M4 6h16v12H4z"/><path d="M8 10h8M8 14h5"/>' },
+  { id: 'reservations', label: 'Reservations', icon: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>' },
+  { id: 'reports',      label: 'Reports',      icon: '<path d="M5 3h9l5 5v13H5z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/>' }
+];
+
+/* ========== VIEWS ========== */
+const Views = {
+
+  dashboard() {
+    const stats = DB.one(`
+      SELECT
+        (SELECT COUNT(*) FROM books) AS books,
+        (SELECT COUNT(*) FROM members WHERE status = 'active') AS members,
+        (SELECT COUNT(*) FROM loans WHERE status IN ('active','overdue')) AS on_loan,
+        (SELECT COUNT(*) FROM loans WHERE status = 'overdue') AS overdue,
+        (SELECT COUNT(*) FROM reservations WHERE status = 'pending') AS reservations,
+        (SELECT COALESCE(SUM(fine_amount),0) FROM loans WHERE fine_paid = 0) AS unpaid_fines
+    `);
+
+    const recent = DB.all(`
+      SELECT l.id, l.loan_date, l.due_date, l.status,
+             b.title AS book_title,
+             m.first_name || ' ' || m.last_name AS member_name
+      FROM loans l
+      JOIN books b ON l.book_id = b.id
+      JOIN members m ON l.member_id = m.id
+      ORDER BY l.id DESC LIMIT 6
+    `);
+
+    const popular = DB.all(`
+      SELECT b.title, b.author, COUNT(l.id) AS loans
+      FROM books b
+      JOIN loans l ON l.book_id = b.id
+      GROUP BY b.id
+      ORDER BY loans DESC LIMIT 5
+    `);
+    const maxLoans = Math.max(...popular.map(p => p.loans), 1);
+
+    const overdueList = DB.all(`
+      SELECT l.id, l.due_date, b.title, m.first_name, m.last_name,
+        CAST(julianday('now') - julianday(l.due_date) AS INTEGER) AS days_overdue
+      FROM loans l
+      JOIN books b ON l.book_id = b.id
+      JOIN members m ON l.member_id = m.id
+      WHERE l.status = 'overdue'
+      ORDER BY days_overdue DESC LIMIT 5
+    `);
+
+    return `
+      <div class="flex items-end justify-between mb-8 gap-4 flex-wrap">
+        <div>
+          <h1 class="text-2xl font-semibold tracking-tight">Dashboard</h1>
+          <p class="text-sm text-stone-500 mt-1">Library circulation overview</p>
+        </div>
+        <div class="flex gap-2">
+          <button data-quick="issue" class="inline-flex items-center gap-2 bg-white hover:bg-stone-200 text-black font-medium px-4 py-2 rounded-lg text-sm transition-colors">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            Issue book
+          </button>
+          <button data-quick="return" class="inline-flex items-center gap-2 border border-white/[0.09] hover:border-white/[0.18] text-stone-200 font-medium px-4 py-2 rounded-lg text-sm transition-colors">
+            Return book
+          </button>
+        </div>
+      </div>
+
+      <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
+        ${this._stat('Books in catalog', stats.books, 'from-accent/10')}
+        ${this._stat('Active members', stats.members, 'from-emerald-500/10')}
+        ${this._stat('Currently on loan', stats.on_loan, 'from-purple-500/10')}
+        ${this._stat('Overdue', stats.overdue, stats.overdue > 0 ? 'from-red-500/10' : 'from-emerald-500/10')}
+        ${this._stat('Reservations', stats.reservations, 'from-accent/10')}
+        ${this._stat('Unpaid fines', U.currency(stats.unpaid_fines), stats.unpaid_fines > 0 ? 'from-amber-500/10' : 'from-emerald-500/10')}
+      </div>
+
+      ${overdueList.length > 0 ? `
+        <div class="surface rounded-xl p-5 mb-6 border-red-500/20">
+          <div class="flex items-center gap-2.5 mb-4">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-red-400"><path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/></svg>
+            <h2 class="text-sm font-medium text-red-300">Overdue loans requiring attention</h2>
+          </div>
+          <div class="space-y-2">
+            ${overdueList.map(o => `
+              <div class="flex items-center justify-between py-2.5 border-b border-white/[0.04] last:border-0">
+                <div class="min-w-0 flex-1">
+                  <div class="text-[13px] text-stone-100">${U.esc(o.title)}</div>
+                  <div class="text-[11px] text-stone-500 font-mono">${U.esc(o.first_name)} ${U.esc(o.last_name)} · due ${U.date(o.due_date)}</div>
+                </div>
+                <div class="ml-3 flex items-center gap-3">
+                  <span class="text-[11px] font-mono text-red-400">${o.days_overdue} days</span>
+                  <span class="text-[11px] font-mono text-amber-300">${U.currency(o.days_overdue * RULES.FINE_PER_DAY)}</span>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
+
+      <div class="grid lg:grid-cols-2 gap-4">
+        <div class="surface rounded-xl p-6">
+          <h2 class="text-sm font-medium text-stone-200 mb-5">Most borrowed titles</h2>
+          <div class="space-y-3">
+            ${popular.map(p => `
+              <div>
+                <div class="flex justify-between text-xs mb-1.5">
+                  <span class="text-stone-300 truncate pr-3">${U.esc(p.title)}</span>
+                  <span class="text-stone-500 font-mono shrink-0">${p.loans}</span>
+                </div>
+                <div class="h-1.5 bg-white/[0.04] rounded-full overflow-hidden">
+                  <div class="h-full bg-gradient-to-r from-accent to-[#8b7cff] rounded-full" style="width:${(p.loans/maxLoans)*100}%"></div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+
+        <div class="surface rounded-xl overflow-hidden">
+          <div class="p-5 border-b border-white/[0.06]">
+            <h2 class="text-sm font-medium text-stone-200">Recent loans</h2>
+          </div>
+          <div class="divide-y divide-white/[0.04]">
+            ${recent.map(r => `
+              <div class="px-5 py-3 flex items-center justify-between gap-3">
+                <div class="min-w-0 flex-1">
+                  <div class="text-[13px] text-stone-200 truncate">${U.esc(r.book_title)}</div>
+                  <div class="text-[11px] text-stone-500 font-mono truncate">${U.esc(r.member_name)} · ${U.time(r.loan_date)}</div>
+                </div>
+                <div class="shrink-0">${UI.statusBadge(r.status)}</div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    `;
+  },
+
+  _stat(label, value, gradient) {
+    return `
+      <div class="surface surface-hover rounded-xl p-5 relative overflow-hidden transition-colors">
+        <div class="absolute -top-8 -right-8 w-24 h-24 rounded-full bg-gradient-to-br ${gradient} to-transparent blur-2xl"></div>
+        <div class="relative">
+          <div class="text-[11px] font-mono uppercase tracking-wider text-stone-500">${U.esc(label)}</div>
+          <div class="text-2xl font-semibold text-stone-50 mt-3 tracking-tight">${value}</div>
+        </div>
+      </div>
+    `;
+  },
+
+  circulation() {
+    const canIssue = Auth.can('loans.issue');
+    const canReturn = Auth.can('loans.return');
+
+    const activeLoans = DB.all(`
+      SELECT l.id, l.loan_date, l.due_date, l.status,
+        CAST(julianday('now') - julianday(l.due_date) AS INTEGER) AS days_overdue,
+        b.title AS book_title, b.isbn,
+        m.first_name, m.last_name, m.member_id
+      FROM loans l
+      JOIN books b ON l.book_id = b.id
+      JOIN members m ON l.member_id = m.id
+      WHERE l.status IN ('active', 'overdue')
+      ORDER BY l.due_date ASC
+    `);
+
+    return `
+      <div class="mb-8">
+        <h1 class="text-2xl font-semibold tracking-tight">Circulation Desk</h1>
+        <p class="text-sm text-stone-500 mt-1">Issue new loans and process returns</p>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-4 mb-8">
+        ${canIssue ? `
+          <div class="surface rounded-xl p-6">
+            <div class="flex items-center gap-3 mb-5">
+              <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-accent to-[#8b7cff] flex items-center justify-center">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#08090a" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+              </div>
+              <div>
+                <h2 class="text-base font-medium">Issue a book</h2>
+                <p class="text-[11px] text-stone-500 font-mono">Loan period: ${RULES.LOAN_DAYS} days</p>
+              </div>
+            </div>
+            <form id="issueForm" class="space-y-3">
+              <div>
+                <label class="block text-[10px] font-mono uppercase tracking-widest text-stone-500 mb-2">Book</label>
+                <select name="book" id="issueBookSelect" required class="w-full bg-white/[0.02] border border-white/[0.08] rounded-lg px-3 py-2.5 text-sm text-stone-100 outline-none">
+                  <option value="">Select a book…</option>
+                  ${DB.all(`
+                    SELECT b.id, b.title, b.author, b.available_copies, b.total_copies
+                    FROM books b
+                    ORDER BY b.title
+                  `).map(b => `
+                    <option value="${b.id}" ${b.available_copies === 0 ? 'disabled' : ''}>
+                      ${U.esc(b.title)} — ${U.esc(b.author)} (${b.available_copies}/${b.total_copies} available)
+                    </option>
+                  `).join('')}
+                </select>
+              </div>
+              <div>
+                <label class="block text-[10px] font-mono uppercase tracking-widest text-stone-500 mb-2">Member</label>
+                <select name="member" id="issueMemberSelect" required class="w-full bg-white/[0.02] border border-white/[0.08] rounded-lg px-3 py-2.5 text-sm text-stone-100 outline-none">
+                  <option value="">Select a member…</option>
+                  ${DB.all(`
+                    SELECT m.id, m.member_id, m.first_name, m.last_name, m.status,
+                      (SELECT COUNT(*) FROM loans WHERE member_id = m.id AND status IN ('active','overdue')) AS active_loans,
+                      (SELECT COALESCE(SUM(fine_amount),0) FROM loans WHERE member_id = m.id AND fine_paid = 0) AS unpaid
+                    FROM members m WHERE m.status = 'active' ORDER BY m.last_name
+                  `).map(m => `
+                    <option value="${m.id}">
+                      ${U.esc(m.first_name)} ${U.esc(m.last_name)} — ${U.esc(m.member_id)} · ${m.active_loans}/${RULES.MAX_LOANS_PER_MEMBER} loans${m.unpaid > 0 ? ` · ${U.currency(m.unpaid)} owed` : ''}
+                    </option>
+                  `).join('')}
+                </select>
+              </div>
+              <button type="submit" class="w-full bg-white hover:bg-stone-200 text-black font-medium py-2.5 rounded-lg text-sm transition-colors">Issue book</button>
+            </form>
+          </div>
+        ` : `
+          <div class="surface rounded-xl p-6 opacity-60">
+            <p class="text-sm text-stone-500">Read-only — sign in as librarian or admin to issue books</p>
+          </div>
+        `}
+
+        <div class="surface rounded-xl p-6">
+          <div class="flex items-center gap-3 mb-5">
+            <div class="w-10 h-10 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14l2 2 4-4"/><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/></svg>
+            </div>
+            <div>
+              <h2 class="text-base font-medium">Quick return</h2>
+              <p class="text-[11px] text-stone-500 font-mono">${activeLoans.length} active loans</p>
+            </div>
+          </div>
+          <p class="text-[12px] text-stone-500 leading-relaxed mb-4">
+            Click <strong class="text-stone-300">Return</strong> on any loan below. Overdue fines are calculated automatically at ${U.currency(RULES.FINE_PER_DAY)}/day.
+          </p>
+          <div class="max-h-[340px] overflow-y-auto -mx-2 px-2 space-y-1.5">
+            ${activeLoans.length === 0 ? '<p class="text-xs text-stone-500 text-center py-6">No active loans</p>' :
+              activeLoans.map(l => `
+                <div class="flex items-center justify-between gap-3 py-2.5 px-3 rounded-lg hover:bg-white/[0.02] transition-colors">
+                  <div class="min-w-0 flex-1">
+                    <div class="text-[13px] text-stone-100 truncate">${U.esc(l.book_title)}</div>
+                    <div class="text-[11px] text-stone-500 font-mono truncate">
+                      ${U.esc(l.first_name)} ${U.esc(l.last_name)}
+                      ${l.days_overdue > 0
+                        ? `<span class="text-red-400 ml-1">· ${l.days_overdue}d overdue (${U.currency(l.days_overdue * RULES.FINE_PER_DAY)})</span>`
+                        : `· due ${U.date(l.due_date)}`}
+                    </div>
+                  </div>
+                  ${canReturn ? `
+                    <button data-return="${l.id}" class="shrink-0 text-[11px] font-medium bg-white/[0.06] hover:bg-white text-stone-200 hover:text-black px-3 py-1.5 rounded-md transition-colors">Return</button>
+                  ` : ''}
+                </div>
+              `).join('')}
+          </div>
+        </div>
+      </div>
+
+      <div class="surface rounded-xl p-6">
+        <h3 class="text-sm font-medium text-stone-200 mb-3">Business rules enforced at the database level</h3>
+        <div class="grid sm:grid-cols-2 gap-3 text-xs text-stone-500">
+          <div class="flex items-start gap-2.5">
+            <span class="text-accent-soft mt-0.5">·</span>
+            <span>Loan period: <strong class="text-stone-300">${RULES.LOAN_DAYS} days</strong></span>
+          </div>
+          <div class="flex items-start gap-2.5">
+            <span class="text-accent-soft mt-0.5">·</span>
+            <span>Fine rate: <strong class="text-stone-300">${U.currency(RULES.FINE_PER_DAY)}/day overdue</strong></span>
+          </div>
+          <div class="flex items-start gap-2.5">
+            <span class="text-accent-soft mt-0.5">·</span>
+            <span>Max loans per member: <strong class="text-stone-300">${RULES.MAX_LOANS_PER_MEMBER}</strong></span>
+          </div>
+          <div class="flex items-start gap-2.5">
+            <span class="text-accent-soft mt-0.5">·</span>
+            <span>Suspension at <strong class="text-stone-300">${RULES.SUSPEND_OVERDUE_COUNT} overdue</strong> or <strong class="text-stone-300">${U.currency(RULES.SUSPEND_FINE_THRESHOLD)} unpaid</strong></span>
+          </div>
+        </div>
+      </div>
+    `;
+  },
+
+  catalog() {
+    const search = this._catSearch || '';
+    const catFilter = this._catCategory || 'all';
+
+    const where = [], params = [];
+    if (search) {
+      where.push('(b.title LIKE ? OR b.author LIKE ? OR b.isbn LIKE ?)');
+      const q = `%${search}%`; params.push(q, q, q);
+    }
+    if (catFilter !== 'all') { where.push('b.category_id = ?'); params.push(catFilter); }
+    const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
+
+    const books = DB.all(`
+      SELECT b.*, c.name AS category_name, c.code AS category_code,
+        (SELECT COUNT(*) FROM loans WHERE book_id = b.id AND status IN ('active','overdue')) AS on_loan
+      FROM books b
+      JOIN categories c ON b.category_id = c.id
+      ${whereSql}
+      ORDER BY b.title
+    `, params);
+
+    const cats = DB.all('SELECT * FROM categories ORDER BY name');
+    const canCreate = Auth.can('books.create');
+
+    return `
+      <div class="flex items-end justify-between mb-8 gap-4 flex-wrap">
+        <div>
+          <h1 class="text-2xl font-semibold tracking-tight">Catalog</h1>
+          <p class="text-sm text-stone-500 mt-1">${books.length} ${books.length === 1 ? 'title' : 'titles'}</p>
+        </div>
+        ${canCreate ? `
+          <button id="newBookBtn" class="inline-flex items-center gap-2 bg-white hover:bg-stone-200 text-black font-medium px-4 py-2 rounded-lg text-sm transition-colors">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            Add book
+          </button>
+        ` : ''}
+      </div>
+
+      <div class="surface rounded-xl p-4 mb-4 flex flex-wrap gap-3">
+        <div class="flex-1 min-w-[200px] relative">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="absolute left-3 top-1/2 -translate-y-1/2 text-stone-500">
+            <circle cx="11" cy="11" r="7"/><path d="M4 20l6-6"/>
+          </svg>
+          <input id="catSearch" type="text" placeholder="Search by title, author, ISBN…" value="${U.esc(search)}"
+            class="w-full bg-white/[0.02] border border-white/[0.08] rounded-lg pl-9 pr-3 py-2 text-sm text-stone-100 outline-none">
+        </div>
+        <select id="catCategory" class="bg-white/[0.02] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-stone-100 outline-none">
+          <option value="all" ${catFilter === 'all' ? 'selected' : ''}>All categories</option>
+          ${cats.map(c => `<option value="${c.id}" ${catFilter == c.id ? 'selected' : ''}>${U.esc(c.name)}</option>`).join('')}
+        </select>
+      </div>
+
+      ${books.length === 0 ? UI.empty('No books found', 'Try clearing your search or filters.') : `
+        <div class="surface rounded-xl overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="text-[11px] font-mono uppercase tracking-wider text-stone-500">
+                <tr class="border-b border-white/[0.06]">
+                  <th class="text-left px-5 py-3 font-normal">Title</th>
+                  <th class="text-left px-5 py-3 font-normal">Author</th>
+                  <th class="text-left px-5 py-3 font-normal">Category</th>
+                  <th class="text-right px-5 py-3 font-normal">Copies</th>
+                  <th class="text-left px-5 py-3 font-normal">Shelf</th>
+                  <th class="text-right px-5 py-3 font-normal">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${books.map(b => {
+                  const available = b.available_copies;
+                  const total = b.total_copies;
+                  return `
+                    <tr class="border-b border-white/[0.04] last:border-0 hover:bg-white/[0.015] transition-colors">
+                      <td class="px-5 py-3">
+                        <div class="text-stone-100">${U.esc(b.title)}</div>
+                        <div class="text-[11px] text-stone-500 font-mono">${U.esc(b.isbn)}</div>
+                      </td>
+                      <td class="px-5 py-3 text-stone-300 text-[13px]">${U.esc(b.author)}</td>
+                      <td class="px-5 py-3">
+                        <span class="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-white/[0.04] text-stone-400">${U.esc(b.category_code)}</span>
+                      </td>
+                      <td class="px-5 py-3 text-right font-mono text-xs">
+                        <span class="${available === 0 ? 'text-red-400' : available === total ? 'text-stone-300' : 'text-accent-soft'}">
+                          ${available} / ${total}
+                        </span>
+                      </td>
+                      <td class="px-5 py-3 text-stone-500 font-mono text-xs">${U.esc(b.shelf || '—')}</td>
+                      <td class="px-5 py-3 text-right">
+                        <div class="inline-flex gap-1">
+                          ${Auth.can('books.edit') ? `
+                            <button data-edit-book="${b.id}" class="w-7 h-7 rounded-md text-stone-500 hover:text-stone-100 hover:bg-white/[0.06] flex items-center justify-center transition-colors" title="Edit">
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20h4L20 8l-4-4L4 16z"/></svg>
+                            </button>
+                          ` : ''}
+                          ${Auth.can('books.delete') && b.on_loan === 0 ? `
+                            <button data-del-book="${b.id}" class="w-7 h-7 rounded-md text-stone-500 hover:text-red-400 hover:bg-red-500/10 flex items-center justify-center transition-colors" title="Delete">
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
+                            </button>
+                          ` : ''}
+                        </div>
+                      </td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `}
+    `;
+  },
+
+  members() {
+    const members = DB.all(`
+      SELECT m.*,
+        (SELECT COUNT(*) FROM loans WHERE member_id = m.id AND status IN ('active','overdue')) AS active_loans,
+        (SELECT COUNT(*) FROM loans WHERE member_id = m.id AND status = 'overdue') AS overdue,
+        (SELECT COALESCE(SUM(fine_amount),0) FROM loans WHERE member_id = m.id AND fine_paid = 0) AS unpaid
+      FROM members m
+      ORDER BY m.last_name, m.first_name
+    `);
+    const canCreate = Auth.can('members.create');
+
+    return `
+      <div class="flex items-end justify-between mb-8 gap-4 flex-wrap">
+        <div>
+          <h1 class="text-2xl font-semibold tracking-tight">Members</h1>
+          <p class="text-sm text-stone-500 mt-1">${members.length} registered members</p>
+        </div>
+        ${canCreate ? `
+          <button id="newMemberBtn" class="inline-flex items-center gap-2 bg-white hover:bg-stone-200 text-black font-medium px-4 py-2 rounded-lg text-sm transition-colors">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            Register member
+          </button>
+        ` : ''}
+      </div>
+
+      <div class="surface rounded-xl overflow-hidden">
+        <table class="w-full text-sm">
+          <thead class="text-[11px] font-mono uppercase tracking-wider text-stone-500">
+            <tr class="border-b border-white/[0.06]">
+              <th class="text-left px-5 py-3 font-normal">Member</th>
+              <th class="text-left px-5 py-3 font-normal">Contact</th>
+              <th class="text-left px-5 py-3 font-normal">Joined</th>
+              <th class="text-right px-5 py-3 font-normal">Loans</th>
+              <th class="text-right px-5 py-3 font-normal">Fines</th>
+              <th class="text-left px-5 py-3 font-normal">Status</th>
+              <th class="text-right px-5 py-3 font-normal">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${members.map(m => `
+              <tr class="border-b border-white/[0.04] last:border-0 hover:bg-white/[0.015] transition-colors">
+                <td class="px-5 py-3">
+                  <div class="text-stone-100">${U.esc(m.first_name)} ${U.esc(m.last_name)}</div>
+                  <div class="text-[11px] text-stone-500 font-mono">${U.esc(m.member_id)}</div>
+                </td>
+                <td class="px-5 py-3">
+                  <div class="text-stone-300 text-[12px]">${U.esc(m.email)}</div>
+                  <div class="text-[11px] text-stone-500 font-mono">${U.esc(m.phone || '—')}</div>
+                </td>
+                <td class="px-5 py-3 text-stone-400 text-xs whitespace-nowrap">${U.date(m.join_date)}</td>
+                <td class="px-5 py-3 text-right font-mono text-xs">
+                  <span class="${m.active_loans >= RULES.MAX_LOANS_PER_MEMBER ? 'text-amber-400' : 'text-stone-300'}">
+                    ${m.active_loans}${m.overdue > 0 ? ` <span class="text-red-400">(${m.overdue} overdue)</span>` : ''}
+                  </span>
+                </td>
+                <td class="px-5 py-3 text-right font-mono text-xs ${m.unpaid > 0 ? 'text-amber-300' : 'text-stone-500'}">
+                  ${m.unpaid > 0 ? U.currency(m.unpaid) : '—'}
+                </td>
+                <td class="px-5 py-3">${UI.statusBadge(m.status)}</td>
+                <td class="px-5 py-3 text-right">
+                  <div class="inline-flex gap-1">
+                    ${Auth.can('members.edit') ? `
+                      <button data-edit-member="${m.id}" class="w-7 h-7 rounded-md text-stone-500 hover:text-stone-100 hover:bg-white/[0.06] flex items-center justify-center transition-colors" title="Edit">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20h4L20 8l-4-4L4 16z"/></svg>
+                      </button>
+                    ` : ''}
+                    ${Auth.can('members.delete') && m.active_loans === 0 ? `
+                      <button data-del-member="${m.id}" class="w-7 h-7 rounded-md text-stone-500 hover:text-red-400 hover:bg-red-500/10 flex items-center justify-center transition-colors" title="Delete">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
+                      </button>
+                    ` : ''}
+                  </div>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  },
+
+  loans() {
+    const filter = this._loanFilter || 'active';
+    let where = '';
+    if (filter === 'active') where = "WHERE l.status IN ('active','overdue')";
+    else if (filter === 'overdue') where = "WHERE l.status = 'overdue'";
+    else if (filter === 'returned') where = "WHERE l.status = 'returned'";
+
+    const loans = DB.all(`
+      SELECT l.*, b.title AS book_title, b.isbn, m.first_name, m.last_name, m.member_id,
+        CAST(julianday('now') - julianday(l.due_date) AS INTEGER) AS days_overdue
+      FROM loans l
+      JOIN books b ON l.book_id = b.id
+      JOIN members m ON l.member_id = m.id
+      ${where}
+      ORDER BY l.loan_date DESC
+    `);
+
+    const counts = DB.one(`
+      SELECT
+        (SELECT COUNT(*) FROM loans WHERE status IN ('active','overdue')) AS active,
+        (SELECT COUNT(*) FROM loans WHERE status = 'overdue') AS overdue,
+        (SELECT COUNT(*) FROM loans WHERE status = 'returned') AS returned,
+        (SELECT COUNT(*) FROM loans) AS all_count
+    `);
+
+    return `
+      <div class="flex items-end justify-between mb-8 gap-4 flex-wrap">
+        <div>
+          <h1 class="text-2xl font-semibold tracking-tight">Loans</h1>
+          <p class="text-sm text-stone-500 mt-1">Complete loan history</p>
+        </div>
+      </div>
+
+      <div class="flex gap-1 mb-5 border-b border-white/[0.06]">
+        ${this._loanTab('active', `Active (${counts.active})`, filter)}
+        ${this._loanTab('overdue', `Overdue (${counts.overdue})`, filter)}
+        ${this._loanTab('returned', `Returned (${counts.returned})`, filter)}
+        ${this._loanTab('all', `All (${counts.all_count})`, filter)}
+      </div>
+
+      ${loans.length === 0 ? UI.empty('No loans in this view') : `
+        <div class="surface rounded-xl overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="text-[11px] font-mono uppercase tracking-wider text-stone-500">
+                <tr class="border-b border-white/[0.06]">
+                  <th class="text-left px-5 py-3 font-normal">Book</th>
+                  <th class="text-left px-5 py-3 font-normal">Member</th>
+                  <th class="text-left px-5 py-3 font-normal">Loan date</th>
+                  <th class="text-left px-5 py-3 font-normal">Due date</th>
+                  <th class="text-left px-5 py-3 font-normal">Returned</th>
+                  <th class="text-right px-5 py-3 font-normal">Fine</th>
+                  <th class="text-left px-5 py-3 font-normal">Status</th>
+                  <th class="text-right px-5 py-3 font-normal">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${loans.map(l => {
+                  const fine = l.fine_amount || (l.days_overdue > 0 && l.status === 'overdue' ? l.days_overdue * RULES.FINE_PER_DAY : 0);
+                  return `
+                    <tr class="border-b border-white/[0.04] last:border-0 hover:bg-white/[0.015] transition-colors">
+                      <td class="px-5 py-3">
+                        <div class="text-stone-100 text-[13px]">${U.esc(l.book_title)}</div>
+                        <div class="text-[11px] text-stone-500 font-mono">${U.esc(l.isbn)}</div>
+                      </td>
+                      <td class="px-5 py-3">
+                        <div class="text-stone-200 text-[13px]">${U.esc(l.first_name)} ${U.esc(l.last_name)}</div>
+                        <div class="text-[11px] text-stone-500 font-mono">${U.esc(l.member_id)}</div>
+                      </td>
+                      <td class="px-5 py-3 text-stone-400 text-xs font-mono whitespace-nowrap">${U.date(l.loan_date)}</td>
+                      <td class="px-5 py-3 text-stone-400 text-xs font-mono whitespace-nowrap ${l.status === 'overdue' ? 'text-red-400' : ''}">
+                        ${U.date(l.due_date)}
+                        ${l.days_overdue > 0 && l.status === 'overdue' ? `<span class="ml-1 text-[10px]">(+${l.days_overdue}d)</span>` : ''}
+                      </td>
+                      <td class="px-5 py-3 text-stone-400 text-xs font-mono whitespace-nowrap">${U.date(l.return_date)}</td>
+                      <td class="px-5 py-3 text-right font-mono text-xs ${fine > 0 ? (l.fine_paid ? 'text-emerald-400' : 'text-amber-300') : 'text-stone-500'}">
+                        ${fine > 0 ? U.currency(fine) : '—'}
+                        ${fine > 0 && !l.fine_paid ? '<div class="text-[10px] text-red-400">unpaid</div>' : ''}
+                        ${fine > 0 && l.fine_paid ? '<div class="text-[10px] text-emerald-400">paid</div>' : ''}
+                      </td>
+                      <td class="px-5 py-3">${UI.statusBadge(l.status)}</td>
+                      <td class="px-5 py-3 text-right">
+                        <div class="inline-flex gap-1">
+                          ${Auth.can('loans.return') && l.status !== 'returned' ? `
+                            <button data-return="${l.id}" class="text-[11px] text-stone-400 hover:text-emerald-300 px-2.5 py-1 rounded-md hover:bg-emerald-500/10 transition-colors">Return</button>
+                          ` : ''}
+                          ${Auth.can('loans.renew') && l.status === 'active' && l.days_overdue <= 0 ? `
+                            <button data-renew="${l.id}" class="text-[11px] text-stone-400 hover:text-accent-soft px-2.5 py-1 rounded-md hover:bg-accent/[0.08] transition-colors">Renew</button>
+                          ` : ''}
+                          ${Auth.can('fines.pay') && l.fine_amount > 0 && !l.fine_paid ? `
+                            <button data-pay-fine="${l.id}" class="text-[11px] text-amber-300 hover:text-amber-200 px-2.5 py-1 rounded-md hover:bg-amber-500/10 transition-colors">Pay fine</button>
+                          ` : ''}
+                        </div>
+                      </td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `}
+    `;
+  },
+
+  _loanTab(id, label, active) {
+    return `<button data-loan-filter="${id}" class="px-4 py-2.5 text-[13px] font-medium transition-colors border-b-2 ${
+      active === id ? 'text-stone-100 border-accent' : 'text-stone-500 border-transparent hover:text-stone-300'
+    }">${label}</button>`;
+  },
+
+  reservations() {
+    const pending = DB.all(`
+      SELECT r.*, b.title AS book_title, b.available_copies,
+        m.first_name, m.last_name, m.member_id,
+        CAST(julianday('now') - julianday(r.reserved_at) AS INTEGER) AS days_waiting
+      FROM reservations r
+      JOIN books b ON r.book_id = b.id
+      JOIN members m ON r.member_id = m.id
+      WHERE r.status = 'pending'
+      ORDER BY r.reserved_at ASC
+    `);
+
+    const history = DB.all(`
+      SELECT r.*, b.title AS book_title,
+        m.first_name, m.last_name
+      FROM reservations r
+      JOIN books b ON r.book_id = b.id
+      JOIN members m ON r.member_id = m.id
+      WHERE r.status != 'pending'
+      ORDER BY r.reserved_at DESC LIMIT 20
+    `);
+
+    const byBook = {};
+    pending.forEach(r => {
+      if (!byBook[r.book_id]) byBook[r.book_id] = { title: r.book_title, available: r.available_copies, queue: [] };
+      byBook[r.book_id].queue.push(r);
+    });
+
+    return `
+      <div class="flex items-end justify-between mb-8 gap-4 flex-wrap">
+        <div>
+          <h1 class="text-2xl font-semibold tracking-tight">Reservations</h1>
+          <p class="text-sm text-stone-500 mt-1">${pending.length} pending across ${Object.keys(byBook).length} titles</p>
+        </div>
+      </div>
+
+      ${Object.keys(byBook).length === 0 ? UI.empty('No pending reservations', 'Books with all copies on loan can be reserved from the Catalog view.') : `
+        <div class="space-y-4">
+          ${Object.values(byBook).map(b => `
+            <div class="surface rounded-xl p-5">
+              <div class="flex items-center justify-between mb-4 pb-4 border-b border-white/[0.05]">
+                <div>
+                  <h3 class="text-stone-100 font-medium">${U.esc(b.title)}</h3>
+                  <div class="text-[11px] text-stone-500 font-mono mt-1">
+                    ${b.queue.length} in queue · ${b.available > 0 ? `<span class="text-emerald-400">${b.available} available now</span>` : '<span class="text-red-400">all copies on loan</span>'}
+                  </div>
+                </div>
+              </div>
+              <div class="space-y-2">
+                ${b.queue.map((r, i) => `
+                  <div class="flex items-center justify-between py-2">
+                    <div class="flex items-center gap-3">
+                      <div class="w-6 h-6 rounded-md bg-white/[0.04] border border-white/[0.08] flex items-center justify-center text-[10px] font-mono text-stone-400">
+                        ${i + 1}
+                      </div>
+                      <div>
+                        <div class="text-[13px] text-stone-200">${U.esc(r.first_name)} ${U.esc(r.last_name)}</div>
+                        <div class="text-[11px] text-stone-500 font-mono">${U.esc(r.member_id)} · waiting ${r.days_waiting}d</div>
+                      </div>
+                    </div>
+                    ${Auth.can('reservations.cancel') ? `
+                      <button data-cancel-res="${r.id}" class="text-[11px] text-stone-500 hover:text-red-400 px-2.5 py-1 rounded-md hover:bg-red-500/10 transition-colors">Cancel</button>
+                    ` : ''}
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `}
+
+      ${history.length > 0 ? `
+        <div class="surface rounded-xl overflow-hidden mt-6">
+          <div class="p-5 border-b border-white/[0.06]">
+            <h2 class="text-sm font-medium text-stone-200">Recent reservation history</h2>
+          </div>
+          <div class="divide-y divide-white/[0.04]">
+            ${history.map(h => `
+              <div class="px-5 py-3 flex items-center justify-between gap-3">
+                <div class="min-w-0 flex-1">
+                  <div class="text-[13px] text-stone-200 truncate">${U.esc(h.book_title)}</div>
+                  <div class="text-[11px] text-stone-500 font-mono truncate">${U.esc(h.first_name)} ${U.esc(h.last_name)} · ${U.date(h.reserved_at)}</div>
+                </div>
+                ${UI.statusBadge(h.status)}
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
+    `;
+  },
+
+  reports() {
+    const tab = this._reportsTab || 'overdue';
+    let content = '';
+
+    if (tab === 'overdue') {
+      const rows = DB.all(`
+        SELECT l.id, l.due_date,
+          b.title, b.isbn,
+          m.first_name, m.last_name, m.email,
+          CAST(julianday('now') - julianday(l.due_date) AS INTEGER) AS days_overdue,
+          CAST(julianday('now') - julianday(l.due_date) AS INTEGER) * ${RULES.FINE_PER_DAY} AS fine
+        FROM loans l
+        JOIN books b ON l.book_id = b.id
+        JOIN members m ON l.member_id = m.id
+        WHERE l.status = 'overdue'
+        ORDER BY days_overdue DESC
+      `);
+      const total = rows.reduce((s, r) => s + r.fine, 0);
+
+      content = rows.length === 0 ? UI.empty('No overdue books', 'Great job — everyone is on time.') : `
+        <div class="grid grid-cols-3 gap-3 mb-5">
+          <div class="surface rounded-lg p-4">
+            <div class="text-[10px] font-mono uppercase tracking-widest text-stone-500">Overdue loans</div>
+            <div class="text-2xl font-semibold mt-2 text-red-400">${rows.length}</div>
+          </div>
+          <div class="surface rounded-lg p-4">
+            <div class="text-[10px] font-mono uppercase tracking-widest text-stone-500">Total fines</div>
+            <div class="text-2xl font-semibold mt-2 text-amber-300">${U.currency(total)}</div>
+          </div>
+          <div class="surface rounded-lg p-4">
+            <div class="text-[10px] font-mono uppercase tracking-widest text-stone-500">Avg overdue</div>
+            <div class="text-2xl font-semibold mt-2 text-stone-200">${Math.round(rows.reduce((s, r) => s + r.days_overdue, 0) / rows.length)}d</div>
+          </div>
+        </div>
+        <div class="surface rounded-xl overflow-hidden">
+          <table class="w-full text-sm">
+            <thead class="text-[11px] font-mono uppercase tracking-wider text-stone-500">
+              <tr class="border-b border-white/[0.06]">
+                <th class="text-left px-5 py-3 font-normal">Book</th>
+                <th class="text-left px-5 py-3 font-normal">Member</th>
+                <th class="text-left px-5 py-3 font-normal">Due date</th>
+                <th class="text-right px-5 py-3 font-normal">Days</th>
+                <th class="text-right px-5 py-3 font-normal">Fine</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(r => `
+                <tr class="border-b border-white/[0.04] last:border-0">
+                  <td class="px-5 py-3">
+                    <div class="text-stone-100 text-[13px]">${U.esc(r.title)}</div>
+                    <div class="text-[11px] text-stone-500 font-mono">${U.esc(r.isbn)}</div>
+                  </td>
+                  <td class="px-5 py-3">
+                    <div class="text-stone-200 text-[13px]">${U.esc(r.first_name)} ${U.esc(r.last_name)}</div>
+                    <div class="text-[11px] text-stone-500 font-mono">${U.esc(r.email)}</div>
+                  </td>
+                  <td class="px-5 py-3 text-stone-400 text-xs font-mono">${U.date(r.due_date)}</td>
+                  <td class="px-5 py-3 text-right font-mono text-xs text-red-400">${r.days_overdue}</td>
+                  <td class="px-5 py-3 text-right font-mono text-xs text-amber-300">${U.currency(r.fine)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    } else if (tab === 'popular') {
+      const rows = DB.all(`
+        SELECT b.title, b.author, c.name AS category,
+          COUNT(l.id) AS total_loans,
+          SUM(CASE WHEN l.status = 'returned' THEN 1 ELSE 0 END) AS returned,
+          SUM(CASE WHEN l.status IN ('active','overdue') THEN 1 ELSE 0 END) AS out
+        FROM books b
+        JOIN categories c ON b.category_id = c.id
+        LEFT JOIN loans l ON l.book_id = b.id
+        GROUP BY b.id
+        HAVING total_loans > 0
+        ORDER BY total_loans DESC
+        LIMIT 20
+      `);
+      const max = Math.max(...rows.map(r => r.total_loans), 1);
+
+      content = rows.length === 0 ? UI.empty('No loan history yet') : `
+        <div class="surface rounded-xl p-6">
+          <div class="space-y-4">
+            ${rows.map(r => `
+              <div>
+                <div class="flex justify-between text-xs mb-1.5">
+                  <div>
+                    <span class="text-stone-200">${U.esc(r.title)}</span>
+                    <span class="text-stone-500 ml-2 font-mono">${U.esc(r.author)}</span>
+                  </div>
+                  <span class="text-stone-400 font-mono shrink-0 ml-3">${r.total_loans} loans</span>
+                </div>
+                <div class="h-1.5 bg-white/[0.04] rounded-full overflow-hidden">
+                  <div class="h-full bg-gradient-to-r from-accent to-[#8b7cff] rounded-full" style="width:${(r.total_loans/max)*100}%"></div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    } else if (tab === 'members') {
+      const rows = DB.all(`
+        SELECT m.member_id, m.first_name, m.last_name, m.status,
+          COUNT(l.id) AS total_loans,
+          SUM(CASE WHEN l.status = 'returned' THEN 1 ELSE 0 END) AS returned,
+          SUM(CASE WHEN l.status IN ('active','overdue') THEN 1 ELSE 0 END) AS active,
+          COALESCE(SUM(CASE WHEN l.fine_paid = 0 THEN l.fine_amount ELSE 0 END), 0) AS owed
+        FROM members m
+        LEFT JOIN loans l ON l.member_id = m.id
+        GROUP BY m.id
+        HAVING total_loans > 0
+        ORDER BY total_loans DESC
+      `);
+      content = rows.length === 0 ? UI.empty('No member activity yet') : `
+        <div class="surface rounded-xl overflow-hidden">
+          <table class="w-full text-sm">
+            <thead class="text-[11px] font-mono uppercase tracking-wider text-stone-500">
+              <tr class="border-b border-white/[0.06]">
+                <th class="text-left px-5 py-3 font-normal">Member</th>
+                <th class="text-right px-5 py-3 font-normal">Total loans</th>
+                <th class="text-right px-5 py-3 font-normal">Returned</th>
+                <th class="text-right px-5 py-3 font-normal">Active</th>
+                <th class="text-right px-5 py-3 font-normal">Unpaid</th>
+                <th class="text-left px-5 py-3 font-normal">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(r => `
+                <tr class="border-b border-white/[0.04] last:border-0">
+                  <td class="px-5 py-3">
+                    <div class="text-stone-100 text-[13px]">${U.esc(r.first_name)} ${U.esc(r.last_name)}</div>
+                    <div class="text-[11px] text-stone-500 font-mono">${U.esc(r.member_id)}</div>
+                  </td>
+                  <td class="px-5 py-3 text-right font-mono text-xs text-stone-200">${r.total_loans}</td>
+                  <td class="px-5 py-3 text-right font-mono text-xs text-stone-400">${r.returned}</td>
+                  <td class="px-5 py-3 text-right font-mono text-xs ${r.active > 0 ? 'text-accent-soft' : 'text-stone-500'}">${r.active}</td>
+                  <td class="px-5 py-3 text-right font-mono text-xs ${r.owed > 0 ? 'text-amber-300' : 'text-stone-500'}">${r.owed > 0 ? U.currency(r.owed) : '—'}</td>
+                  <td class="px-5 py-3">${UI.statusBadge(r.status)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    } else if (tab === 'sql') {
+      const sql = this._sqlInput || 'SELECT b.title, b.author, COUNT(l.id) AS times_borrowed\nFROM books b\nLEFT JOIN loans l ON l.book_id = b.id\nGROUP BY b.id\nORDER BY times_borrowed DESC\nLIMIT 10;';
+      const result = this._sqlResult;
+      content = `
+        <div class="mb-4">
+          <label class="block text-[10px] font-mono uppercase tracking-widest text-stone-500 mb-2">Run SQL against the live database</label>
+          <textarea id="sqlConsole" rows="7" spellcheck="false"
+            class="w-full bg-white/[0.02] border border-white/[0.08] rounded-lg px-3.5 py-3 text-[13px] text-stone-100 font-mono outline-none resize-y">${U.esc(sql)}</textarea>
+          <div class="flex items-center gap-2 mt-3">
+            <button id="sqlRun" class="bg-white hover:bg-stone-200 text-black font-medium px-4 py-2 rounded-lg text-[13px] transition-colors">Run query</button>
+            <span class="text-[11px] text-stone-500 font-mono">Tables: books, members, loans, reservations, categories</span>
+          </div>
+        </div>
+
+        ${result ? `
+          <div class="mt-4">
+            ${result.error ? `
+              <div class="surface border-red-500/30 rounded-lg p-4 text-red-300 text-xs font-mono">${U.esc(result.error)}</div>
+            ` : result.sets.length === 0 ? `
+              <div class="surface rounded-lg p-4 text-emerald-400 text-xs font-mono">Statement executed. No rows returned.</div>
+            ` : result.sets.map(set => `
+              <div class="surface rounded-lg overflow-hidden mt-3">
+                <table class="w-full text-xs">
+                  <thead class="font-mono uppercase tracking-wider text-stone-500 bg-white/[0.02]">
+                    <tr class="border-b border-white/[0.06]">
+                      ${set.columns.map(c => `<th class="text-left px-4 py-2.5 font-normal">${U.esc(c)}</th>`).join('')}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${set.values.slice(0, 100).map(row => `
+                      <tr class="border-b border-white/[0.04] last:border-0">
+                        ${row.map(v => `<td class="px-4 py-2 text-stone-300 font-mono">${v === null ? '<span class="text-stone-600">NULL</span>' : U.esc(v)}</td>`).join('')}
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+                ${set.values.length > 100 ? `<div class="px-4 py-2 text-[11px] text-stone-500 border-t border-white/[0.06]">Showing first 100 of ${set.values.length} rows</div>` : ''}
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+      `;
+    }
+
+    return `
+      <div class="mb-8">
+        <h1 class="text-2xl font-semibold tracking-tight">Reports</h1>
+        <p class="text-sm text-stone-500 mt-1">Overdue, popular titles, member activity, and a live SQL console</p>
+      </div>
+
+      <div class="flex gap-1 mb-5 border-b border-white/[0.06] overflow-x-auto">
+        ${this._reportTab('overdue', 'Overdue report', tab)}
+        ${this._reportTab('popular', 'Most borrowed', tab)}
+        ${this._reportTab('members', 'Member activity', tab)}
+        ${this._reportTab('sql', 'SQL console', tab)}
+      </div>
+
+      ${content}
+    `;
+  },
+
+  _reportTab(id, label, active) {
+    return `<button data-report-tab="${id}" class="px-4 py-2.5 text-[13px] font-medium transition-colors border-b-2 whitespace-nowrap ${
+      active === id ? 'text-stone-100 border-accent' : 'text-stone-500 border-transparent hover:text-stone-300'
+    }">${U.esc(label)}</button>`;
+  }
+};
+
+/* ========== ROUTER + APP ========== */
+const App = {
+  currentView: 'dashboard',
+
+  render() {
+    document.getElementById('nav').innerHTML = NAV.map(item => `
+      <a href="#" data-view="${item.id}" class="nav-item flex items-center gap-3 px-5 py-2.5 text-[13px] text-stone-400 ${this.currentView === item.id ? 'active' : ''}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${item.icon}</svg>
+        ${U.esc(item.label)}
+      </a>
+    `).join('');
+
+    const user = Auth.current;
+    if (user) {
+      document.getElementById('userCard').innerHTML = `
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-accent to-[#8b7cff] flex items-center justify-center text-black font-semibold text-xs shrink-0">
+            ${U.esc(user.name[0])}
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="text-[12px] text-stone-200 font-medium truncate">${U.esc(user.name)}</div>
+            <div class="text-[10px] text-stone-500 font-mono truncate">@${U.esc(user.username)}</div>
+          </div>
+        </div>
+        <div class="mt-2.5 flex items-center justify-between">
+          ${UI.roleBadge(user.role)}
+          <button id="logoutBtn" class="text-[11px] text-stone-500 hover:text-stone-100 transition-colors">Sign out</button>
+        </div>
+      `;
+    }
+
+    const current = NAV.find(n => n.id === this.currentView);
+    document.getElementById('breadcrumb').textContent = current ? current.label : '';
+
+    const overdue = DB.one("SELECT COUNT(*) c FROM loans WHERE status = 'overdue'").c;
+    document.getElementById('overdueIndicator').innerHTML = overdue > 0
+      ? `<span class="text-red-400">${overdue} overdue</span>`
+      : `<span class="text-emerald-400">all on time</span>`;
+
+    const main = document.getElementById('main');
+    main.innerHTML = Views[this.currentView] ? Views[this.currentView]() : UI.empty('Not found');
+
+    this.bind();
+  },
+
+  navigate(view) {
+    if (!Views[view]) return;
+    this.currentView = view;
+    this.render();
+  },
+
+  bind() {
+    document.querySelectorAll('[data-view]').forEach(el => {
+      el.addEventListener('click', e => { e.preventDefault(); this.navigate(el.dataset.view); });
+    });
+
+    document.getElementById('logoutBtn')?.addEventListener('click', () => {
+      Auth.logout();
+      document.getElementById('app').classList.add('hidden');
+      document.getElementById('loginScreen').classList.remove('hidden');
+      document.getElementById('loginScreen').classList.add('flex');
+    });
+
+    document.getElementById('resetDbBtn')?.addEventListener('click', () => {
+      if (!Auth.can('db.reset')) { UI.toast('Only administrators can reset the database', 'error'); return; }
+      UI.confirm('Reset the database? All loans, members, and books will be restored to seed data.', () => {
+        DB.reset().then(() => {
+          Library.refreshOverdueStatus();
+          UI.toast('Database reset', 'success');
+          this.render();
+        });
+      }, { title: 'Confirm reset', confirmLabel: 'Reset', danger: true });
+    });
+
+    document.querySelectorAll('[data-quick]').forEach(el => {
+      el.addEventListener('click', () => this.navigate('circulation'));
+    });
+
+    document.getElementById('issueForm')?.addEventListener('submit', e => {
+      e.preventDefault();
+      const bookId = parseInt(e.target.book.value, 10);
+      const memberId = parseInt(e.target.member.value, 10);
+      if (!bookId || !memberId) { UI.toast('Select both a book and a member', 'error'); return; }
+      try {
+        const { dueDate } = Library.issue(bookId, memberId);
+        UI.toast(`Book issued · due ${dueDate}`, 'success');
+        this.render();
+      } catch (err) {
+        UI.toast(err.message, 'error');
+      }
+    });
+
+    document.querySelectorAll('[data-return]').forEach(el => {
+      el.addEventListener('click', () => {
+        const id = parseInt(el.dataset.return, 10);
+        try {
+          const { overdueDays, fine } = Library.returnBook(id);
+          if (fine > 0) UI.toast(`Returned — ${overdueDays}d overdue, fine ${U.currency(fine)}`, 'warn');
+          else UI.toast('Book returned — no fine', 'success');
+          this.render();
+        } catch (err) {
+          UI.toast(err.message, 'error');
+        }
+      });
+    });
+
+    document.querySelectorAll('[data-renew]').forEach(el => {
+      el.addEventListener('click', () => {
+        const id = parseInt(el.dataset.renew, 10);
+        try {
+          const { newDue } = Library.renew(id);
+          UI.toast(`Renewed — new due date ${newDue}`, 'success');
+          this.render();
+        } catch (err) {
+          UI.toast(err.message, 'error');
+        }
+      });
+    });
+
+    document.querySelectorAll('[data-pay-fine]').forEach(el => {
+      el.addEventListener('click', () => {
+        const id = parseInt(el.dataset.payFine, 10);
+        UI.confirm('Mark this fine as paid?', () => {
+          Library.payFine(id);
+          UI.toast('Fine marked as paid', 'success');
+          this.render();
+        }, { title: 'Confirm payment', confirmLabel: 'Mark paid', danger: false });
+      });
+    });
+
+    document.querySelectorAll('[data-cancel-res]').forEach(el => {
+      el.addEventListener('click', () => {
+        const id = parseInt(el.dataset.cancelRes, 10);
+        UI.confirm('Cancel this reservation?', () => {
+          Library.cancelReservation(id);
+          UI.toast('Reservation cancelled', 'success');
+          this.render();
+        }, { title: 'Cancel reservation', confirmLabel: 'Cancel reservation', danger: true });
+      });
+    });
+
+    document.getElementById('newBookBtn')?.addEventListener('click', () => this.bookForm());
+    document.querySelectorAll('[data-edit-book]').forEach(el => {
+      el.addEventListener('click', () => this.bookForm(parseInt(el.dataset.editBook, 10)));
+    });
+    document.querySelectorAll('[data-del-book]').forEach(el => {
+      el.addEventListener('click', () => {
+        const id = parseInt(el.dataset.delBook, 10);
+        const b = DB.one('SELECT * FROM books WHERE id = ?', [id]);
+        UI.confirm(`Delete "${b.title}" from the catalog?`, () => {
+          DB.run('DELETE FROM books WHERE id = ?', [id]);
+          UI.toast('Book deleted', 'success');
+          this.render();
+        });
+      });
+    });
+
+    document.getElementById('newMemberBtn')?.addEventListener('click', () => this.memberForm());
+    document.querySelectorAll('[data-edit-member]').forEach(el => {
+      el.addEventListener('click', () => this.memberForm(parseInt(el.dataset.editMember, 10)));
+    });
+    document.querySelectorAll('[data-del-member]').forEach(el => {
+      el.addEventListener('click', () => {
+        const id = parseInt(el.dataset.delMember, 10);
+        const m = DB.one('SELECT * FROM members WHERE id = ?', [id]);
+        UI.confirm(`Delete member ${m.first_name} ${m.last_name}?`, () => {
+          DB.run('DELETE FROM members WHERE id = ?', [id]);
+          UI.toast('Member deleted', 'success');
+          this.render();
+        });
+      });
+    });
+
+    document.getElementById('catSearch')?.addEventListener('input', e => {
+      Views._catSearch = e.target.value;
+      clearTimeout(this._catTimer);
+      this._catTimer = setTimeout(() => this.render(), 200);
+    });
+    document.getElementById('catCategory')?.addEventListener('change', e => {
+      Views._catCategory = e.target.value;
+      this.render();
+    });
+
+    document.querySelectorAll('[data-loan-filter]').forEach(el => {
+      el.addEventListener('click', () => {
+        Views._loanFilter = el.dataset.loanFilter;
+        this.render();
+      });
+    });
+
+    document.querySelectorAll('[data-report-tab]').forEach(el => {
+      el.addEventListener('click', () => {
+        Views._reportsTab = el.dataset.reportTab;
+        this.render();
+      });
+    });
+
+    document.getElementById('sqlRun')?.addEventListener('click', () => {
+      const sql = document.getElementById('sqlConsole').value.trim();
+      if (!sql) return;
+      Views._sqlInput = sql;
+      try {
+        const sets = DB.exec(sql);
+        Views._sqlResult = { sets: sets.map(s => ({ columns: s.columns, values: s.values })), error: null };
+        if (sets.length === 0) UI.toast('Executed — no rows', 'success');
+        else UI.toast(`Returned ${sets[0].values.length} row${sets[0].values.length === 1 ? '' : 's'}`, 'success');
+      } catch (err) {
+        Views._sqlResult = { sets: [], error: err.message };
+        UI.toast('SQL error', 'error');
+      }
+      this.render();
+    });
+  },
+
+  bookForm(id) {
+    const editing = id !== undefined;
+    const b = editing ? DB.one('SELECT * FROM books WHERE id = ?', [id]) : null;
+    const cats = DB.all('SELECT * FROM categories ORDER BY name');
+
+    UI.modal({
+      title: editing ? 'Edit book' : 'Add book',
+      body: `
+        <form id="bookForm" class="space-y-4">
+          <div class="grid grid-cols-3 gap-3">
+            <div class="col-span-2">
+              <label class="block text-[10px] font-mono uppercase tracking-widest text-stone-500 mb-2">ISBN</label>
+              <input name="isbn" required value="${U.esc(b?.isbn || '')}" placeholder="978-…"
+                class="w-full bg-white/[0.02] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-stone-100 outline-none font-mono">
+            </div>
+            <div>
+              <label class="block text-[10px] font-mono uppercase tracking-widest text-stone-500 mb-2">Year</label>
+              <input name="year" type="number" min="1500" max="2100" value="${b?.published_year || new Date().getFullYear()}"
+                class="w-full bg-white/[0.02] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-stone-100 outline-none font-mono">
+            </div>
+          </div>
+          <div>
+            <label class="block text-[10px] font-mono uppercase tracking-widest text-stone-500 mb-2">Title</label>
+            <input name="title" required value="${U.esc(b?.title || '')}"
+              class="w-full bg-white/[0.02] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-stone-100 outline-none">
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-[10px] font-mono uppercase tracking-widest text-stone-500 mb-2">Author</label>
+              <input name="author" required value="${U.esc(b?.author || '')}"
+                class="w-full bg-white/[0.02] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-stone-100 outline-none">
+            </div>
+            <div>
+              <label class="block text-[10px] font-mono uppercase tracking-widest text-stone-500 mb-2">Publisher</label>
+              <input name="publisher" value="${U.esc(b?.publisher || '')}"
+                class="w-full bg-white/[0.02] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-stone-100 outline-none">
+            </div>
+          </div>
+          <div class="grid grid-cols-3 gap-3">
+            <div>
+              <label class="block text-[10px] font-mono uppercase tracking-widest text-stone-500 mb-2">Category</label>
+              <select name="category_id" required class="w-full bg-white/[0.02] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-stone-100 outline-none">
+                ${cats.map(c => `<option value="${c.id}" ${b?.category_id === c.id ? 'selected' : ''}>${U.esc(c.name)}</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label class="block text-[10px] font-mono uppercase tracking-widest text-stone-500 mb-2">Copies</label>
+              <input name="total" type="number" min="0" required value="${b?.total_copies ?? 1}"
+                class="w-full bg-white/[0.02] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-stone-100 outline-none font-mono">
+            </div>
+            <div>
+              <label class="block text-[10px] font-mono uppercase tracking-widest text-stone-500 mb-2">Shelf</label>
+              <input name="shelf" value="${U.esc(b?.shelf || '')}" placeholder="A-01"
+                class="w-full bg-white/[0.02] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-stone-100 outline-none font-mono">
+            </div>
+          </div>
+        </form>
+      `,
+      footer: `
+        <button data-close class="px-4 py-2 text-sm text-stone-300 hover:text-white transition-colors">Cancel</button>
+        <button id="bookSave" class="px-4 py-2 text-sm font-medium bg-white hover:bg-stone-200 text-black rounded-lg transition-colors">${editing ? 'Save changes' : 'Add book'}</button>
+      `,
+      onMount(root) {
+        root.querySelector('#bookSave').addEventListener('click', () => {
+          const fd = new FormData(root.querySelector('#bookForm'));
+          const data = Object.fromEntries(fd);
+          try {
+            if (editing) {
+              DB.run(
+                `UPDATE books SET isbn=?, title=?, author=?, category_id=?, publisher=?, published_year=?, total_copies=?, shelf=? WHERE id=?`,
+                [data.isbn, data.title, data.author, parseInt(data.category_id, 10), data.publisher, parseInt(data.year, 10) || null, parseInt(data.total, 10), data.shelf, id]
+              );
+              DB.run(`UPDATE books SET available_copies = MIN(available_copies, total_copies) WHERE id = ?`, [id]);
+              UI.toast('Book updated', 'success');
+            } else {
+              DB.run(
+                `INSERT INTO books (isbn, title, author, category_id, publisher, published_year, total_copies, available_copies, shelf) VALUES (?,?,?,?,?,?,?,?,?)`,
+                [data.isbn, data.title, data.author, parseInt(data.category_id, 10), data.publisher, parseInt(data.year, 10) || null, parseInt(data.total, 10), parseInt(data.total, 10), data.shelf]
+              );
+              UI.toast('Book added', 'success');
+            }
+            UI.closeModal();
+            App.render();
+          } catch (err) {
+            UI.toast(err.message.includes('UNIQUE') ? 'ISBN already exists' : err.message, 'error');
+          }
+        });
+      }
+    });
+  },
+
+  memberForm(id) {
+    const editing = id !== undefined;
+    const m = editing ? DB.one('SELECT * FROM members WHERE id = ?', [id]) : null;
+
+    UI.modal({
+      title: editing ? 'Edit member' : 'Register member',
+      body: `
+        <form id="memberForm" class="space-y-4">
+          <div>
+            <label class="block text-[10px] font-mono uppercase tracking-widest text-stone-500 mb-2">Member ID</label>
+            <input name="member_id" required value="${U.esc(m?.member_id || 'MEM-' + (1000 + DB.one('SELECT COUNT(*) c FROM members').c + 1))}"
+              class="w-full bg-white/[0.02] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-stone-100 outline-none font-mono">
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-[10px] font-mono uppercase tracking-widest text-stone-500 mb-2">First name</label>
+              <input name="first_name" required value="${U.esc(m?.first_name || '')}"
+                class="w-full bg-white/[0.02] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-stone-100 outline-none">
+            </div>
+            <div>
+              <label class="block text-[10px] font-mono uppercase tracking-widest text-stone-500 mb-2">Last name</label>
+              <input name="last_name" required value="${U.esc(m?.last_name || '')}"
+                class="w-full bg-white/[0.02] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-stone-100 outline-none">
+            </div>
+          </div>
+          <div>
+            <label class="block text-[10px] font-mono uppercase tracking-widest text-stone-500 mb-2">Email</label>
+            <input name="email" type="email" required value="${U.esc(m?.email || '')}"
+              class="w-full bg-white/[0.02] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-stone-100 outline-none">
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-[10px] font-mono uppercase tracking-widest text-stone-500 mb-2">Phone</label>
+              <input name="phone" value="${U.esc(m?.phone || '')}"
+                class="w-full bg-white/[0.02] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-stone-100 outline-none font-mono">
+            </div>
+            <div>
+              <label class="block text-[10px] font-mono uppercase tracking-widest text-stone-500 mb-2">Status</label>
+              <select name="status" class="w-full bg-white/[0.02] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-stone-100 outline-none">
+                ${['active','suspended','expired'].map(s => `<option value="${s}" ${m?.status === s ? 'selected' : ''}>${s}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+        </form>
+      `,
+      footer: `
+        <button data-close class="px-4 py-2 text-sm text-stone-300 hover:text-white transition-colors">Cancel</button>
+        <button id="memberSave" class="px-4 py-2 text-sm font-medium bg-white hover:bg-stone-200 text-black rounded-lg transition-colors">${editing ? 'Save' : 'Register'}</button>
+      `,
+      onMount(root) {
+        root.querySelector('#memberSave').addEventListener('click', () => {
+          const fd = new FormData(root.querySelector('#memberForm'));
+          const data = Object.fromEntries(fd);
+          try {
+            if (editing) {
+              DB.run(
+                `UPDATE members SET member_id=?, first_name=?, last_name=?, email=?, phone=?, status=? WHERE id=?`,
+                [data.member_id, data.first_name, data.last_name, data.email, data.phone, data.status, id]
+              );
+              UI.toast('Member updated', 'success');
+            } else {
+              DB.run(
+                `INSERT INTO members (member_id, first_name, last_name, email, phone, join_date, status) VALUES (?,?,?,?,?,?,?)`,
+                [data.member_id, data.first_name, data.last_name, data.email, data.phone, U.today(), 'active']
+              );
+              UI.toast('Member registered', 'success');
+            }
+            UI.closeModal();
+            App.render();
+          } catch (err) {
+            UI.toast(err.message.includes('UNIQUE') ? 'Member ID or email already exists' : err.message, 'error');
+          }
+        });
+      }
+    });
+  }
+};
+
+/* ========== BOOT ========== */
+(async function boot() {
+  try {
+    await DB.init();
+    Library.refreshOverdueStatus();
+
+    document.querySelectorAll('[data-fill]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const [u, p] = btn.dataset.fill.split(':');
+        document.getElementById('loginUser').value = u;
+        document.getElementById('loginPass').value = p;
+      });
+    });
+
+    document.getElementById('loginForm').addEventListener('submit', async e => {
+      e.preventDefault();
+      const user = document.getElementById('loginUser').value.trim();
+      const pass = document.getElementById('loginPass').value;
+      const errEl = document.getElementById('loginError');
+      errEl.classList.add('hidden');
+      const res = await Auth.login(user, pass);
+      if (!res.ok) {
+        errEl.textContent = res.error;
+        errEl.classList.remove('hidden');
+        return;
+      }
+      document.getElementById('loginScreen').classList.add('hidden');
+      document.getElementById('loginScreen').classList.remove('flex');
+      document.getElementById('app').classList.remove('hidden');
+      App.render();
+      UI.toast(`Signed in as ${Auth.current.name}`, 'success');
+    });
+
+    document.getElementById('loading').classList.add('hidden');
+    document.getElementById('loginScreen').classList.remove('hidden');
+    document.getElementById('loginScreen').classList.add('flex');
+
+  } catch (err) {
+    console.error(err);
+    document.getElementById('loading').innerHTML = `
+      <div class="text-center max-w-md">
+        <div class="text-red-400 text-sm font-mono">Failed to initialize</div>
+        <div class="text-xs text-stone-500 mt-2">${U.esc(err.message)}</div>
+      </div>
+    `;
+  }
+})();
+</script>
+
+</body>
+</html>
